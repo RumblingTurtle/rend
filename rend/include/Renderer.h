@@ -1,9 +1,13 @@
 #pragma once
+#include "vk_mem_alloc.h"
+#include <Mesh.h>
 #include <RenderPipelineBuilder.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_vulkan.h>
 #include <VkBootstrap.h>
+#include <deque>
 #include <exception>
+#include <functional>
 #include <iostream>
 #include <macros.h>
 #include <vector>
@@ -44,16 +48,32 @@ class Renderer {
   VkFence _command_complete_fence; // Fence for waiting on the command queue
 
   // Triangle rendering layout
-  VkPipelineLayout _triangle_pipeline_layout;
-  VkPipeline _triangle_pipeline;
+  std::vector<VkPipelineLayout> _pipeline_layouts;
+  std::vector<VkPipeline> _pipelines;
 
   int frame_number = 0;
 
   RenderPipelineBuilder _pipeline_builder;
 
-  Shader _triangle_vertex_shader;
-
   bool initialized = false;
+
+  // Vertex buffer allocator
+  VmaAllocator _vb_allocator;
+
+  std::vector<Mesh *> _meshes;
+  struct Deallocator {
+    std::deque<std::function<void()>> _deletion_queue;
+    void push(std::function<void()> &&function) {
+      _deletion_queue.push_back(std::move(function));
+    }
+
+    ~Deallocator() {
+      while (!_deletion_queue.empty()) {
+        _deletion_queue.back()();
+        _deletion_queue.pop_back();
+      }
+    }
+  } _deallocator;
 
 public:
   Renderer() = default;
@@ -75,6 +95,11 @@ public:
   bool init_sync_primitives();
 
   bool init_pipelines();
+
+  bool add_pipeline(Shader &shader,
+                    VertexInfoDescription &vertex_info_description);
+
+  bool load_mesh(Mesh &mesh);
 
   bool draw();
 };

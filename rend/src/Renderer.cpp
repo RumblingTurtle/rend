@@ -1,42 +1,21 @@
 #include "Renderer.h"
+#define VMA_IMPLEMENTATION
 
 Renderer::~Renderer() {
   if (!initialized)
     return;
-  _triangle_vertex_shader.deinit(_device);
-  vkDestroySemaphore(_device, _swapchain_semaphore, nullptr);
-  vkDestroySemaphore(_device, _render_complete_semaphore, nullptr);
-  vkDestroyFence(_device, _command_complete_fence, nullptr);
 
-  vkDestroyCommandPool(_device, _cmd_pool, nullptr);
-
-  vkDestroySwapchainKHR(_device, _swapchain, nullptr);
-
-  vkDestroyRenderPass(_device, _render_pass, nullptr);
-  // destroy swapchain resources
-  for (int i = 0; i < _swapchain_image_views.size(); i++) {
-    vkDestroyFramebuffer(_device, _framebuffers[i], nullptr);
-    vkDestroyImageView(_device, _swapchain_image_views[i], nullptr);
-  }
-
-  vkDestroyDevice(_device, nullptr);
-  vkDestroySurfaceKHR(_instance, _surface, nullptr);
-  vkb::destroy_debug_utils_messenger(_instance, _debug_messenger);
-  vkDestroyInstance(_instance, nullptr);
-  SDL_DestroyWindow(_window);
+  // Wait for the command queue to complete if still running
+  vkWaitForFences(_device, 1, &_command_complete_fence, VK_TRUE, 1000000000);
 }
 
 bool Renderer::init() {
 
-  if (!_triangle_vertex_shader.init(
-          std::string{ASSET_DIRECTORY} + "/shaders/bin/triangle_vert.spv",
-          std::string{ASSET_DIRECTORY} + "/shaders/bin/triangle_frag.spv")) {
-    return false;
-  }
-
   _window = SDL_CreateWindow("rend", SDL_WINDOWPOS_CENTERED,
                              SDL_WINDOWPOS_CENTERED, _window_dims.width,
                              _window_dims.height, SDL_WINDOW_VULKAN);
+
+  _deallocator.push([=]() { SDL_DestroyWindow(_window); });
 
   if (_window == nullptr) {
     std::cerr << "Failed to create _window: " << SDL_GetError() << std::endl;
@@ -82,6 +61,21 @@ bool Renderer::init_vulkan() {
   _graphics_queue = vkb_device.get_queue(vkb::QueueType::graphics).value();
   _queue_family = vkb_device.get_queue_index(vkb::QueueType::graphics).value();
 
+  // Setup VMA allocator
+  VmaAllocatorCreateInfo allocatorInfo = {};
+  allocatorInfo.physicalDevice = _physical_device;
+  allocatorInfo.device = _device;
+  allocatorInfo.instance = _instance;
+  vmaCreateAllocator(&allocatorInfo, &_vb_allocator);
+
+  _deallocator.push([=]() {
+    vmaDestroyAllocator(_vb_allocator);
+    vkDestroyDevice(_device, nullptr);
+    vkDestroySurfaceKHR(_instance, _surface, nullptr);
+    vkb::destroy_debug_utils_messenger(_instance, _debug_messenger);
+    vkDestroyInstance(_instance, nullptr);
+  });
+
   return true;
 }
 
@@ -100,6 +94,9 @@ bool Renderer::init_swapchain() {
   _swapchain_images = vkb_swapchain.get_images().value();
   _swapchain_image_views = vkb_swapchain.get_image_views().value();
   _swapchain_image_format = vkb_swapchain.image_format;
+
+  _deallocator.push(
+      [=] { vkDestroySwapchainKHR(_device, _swapchain, nullptr); });
   return true;
 }
 
@@ -124,6 +121,17 @@ bool Renderer::init_cmd_buffer() {
 
   VK_CHECK(vkAllocateCommandBuffers(_device, &cmd_buffer_info, &_cmd_buffer),
            "Failed to allocate command buffer");
+
+  _deallocator.push([=] {
+    vkDestroyCommandPool(_device, _cmd_pool, nullptr);
+
+    vkDestroyRenderPass(_device, _render_pass, nullptr);
+    // destroy swapchain resources
+    for (int i = 0; i < _swapchain_image_views.size(); i++) {
+      vkDestroyFramebuffer(_device, _framebuffers[i], nullptr);
+      vkDestroyImageView(_device, _swapchain_image_views[i], nullptr);
+    }
+  });
 
   return true;
 }
@@ -218,6 +226,12 @@ bool Renderer::init_sync_primitives() {
       vkCreateFence(_device, &fence_info, nullptr, &_command_complete_fence),
       "Failed to create render fence");
 
+  _deallocator.push([=] {
+    vkDestroySemaphore(_device, _swapchain_semaphore, nullptr);
+    vkDestroySemaphore(_device, _render_complete_semaphore, nullptr);
+    vkDestroyFence(_device, _command_complete_fence, nullptr);
+  });
+
   return true;
 }
 
@@ -247,7 +261,7 @@ bool Renderer::draw() {
            "Failed to begin command buffer");
 
   VkClearValue clear_value;
-  clear_value.color = {{0.0f, 0.0f, abs(sin(frame_number / 120.f)), 1.0f}};
+  clear_value.color = {{0.5f, 0.5f, 0.5, 1.0f}};
 
   VkRenderPassBeginInfo rp_info = {};
   rp_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -264,9 +278,24 @@ bool Renderer::draw() {
 
   vkCmdBeginRenderPass(_cmd_buffer, &rp_info, VK_SUBPASS_CONTENTS_INLINE);
 
-  vkCmdBindPipeline(_cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                    _triangle_pipeline);
-  vkCmdDraw(_cmd_buffer, 3, 1, 0, 0);
+  // Binding first pipeline which is a single triangle
+  //{
+  //  vkCmdBindPipeline(_cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+  //                    _pipelines[0]);
+  //  vkCmdDraw(_cmd_buffer, 3, 1, 0, 0);
+  //}
+
+  for (int m_idx = 0; m_idx < _meshes.size(); m_idx++) {
+    Mesh *mesh = _meshes[m_idx];
+
+    vkCmdBindPipeline(_cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      _pipelines[m_idx + 1]);
+
+    VkDeviceSize offset = 0;
+    vkCmdBindVertexBuffers(_cmd_buffer, 0, 1, &mesh->_vertex_buffer._buffer,
+                           &offset);
+    vkCmdDraw(_cmd_buffer, mesh->_vertices.size(), 1, 0, 0);
+  }
 
   vkCmdEndRenderPass(_cmd_buffer);
 
@@ -294,6 +323,10 @@ bool Renderer::draw() {
   submit.commandBufferCount = 1;
   submit.pCommandBuffers = &_cmd_buffer;
 
+  if (vkGetFenceStatus(_device, _command_complete_fence) == VK_SUCCESS) {
+    vkResetFences(_device, 1, &_command_complete_fence);
+  }
+
   VK_CHECK(vkQueueSubmit(_graphics_queue, 1, &submit, _command_complete_fence),
            "Failed to submit to queue");
 
@@ -317,20 +350,73 @@ bool Renderer::draw() {
   return true;
 }
 
+// Initializes static pipelines
 bool Renderer::init_pipelines() {
-  VkPipelineLayoutCreateInfo pipeline_layout_info =
-      _pipeline_builder.get_pipeline_layout_create_info();
+  Shader _triangle_vertex_shader{
+      std::string{ASSET_DIRECTORY} + "/shaders/bin/triangle_vert.spv",
+      std::string{ASSET_DIRECTORY} + "/shaders/bin/triangle_frag.spv"};
+  VertexInfoDescription d{};
+  add_pipeline(_triangle_vertex_shader, d);
 
-  VK_CHECK(vkCreatePipelineLayout(_device, &pipeline_layout_info, nullptr,
-                                  &_triangle_pipeline_layout),
-           "Failed to create pipeline layout");
+  return true;
+}
 
-  if (!_triangle_vertex_shader.build_shader_modules(_device)) {
+bool Renderer::add_pipeline(Shader &shader,
+                            VertexInfoDescription &vertex_info_description) {
+
+  if (!shader.build_shader_modules(_device)) {
     return false;
   }
-  _triangle_pipeline = _pipeline_builder.build_pipeline(
-      _device, _render_pass, _triangle_vertex_shader, _window_dims,
-      _triangle_pipeline_layout);
 
+  _pipeline_layouts.resize(_pipeline_layouts.size() + 1);
+  _pipelines.resize(_pipelines.size() + 1);
+  _pipeline_builder.build_pipeline_layout(_device, _pipeline_layouts.back());
+  _pipeline_builder.build_pipeline(_device, _render_pass, shader, _window_dims,
+                                   _pipeline_layouts.back(),
+                                   vertex_info_description, _pipelines.back());
+
+  // Shader modules can be destroyed after pipeline creation
+  shader.deinit(_device);
+
+  int pipeline_idx = _pipelines.size() - 1;
+  _deallocator.push([=] {
+    vkDestroyPipeline(_device, _pipelines[pipeline_idx], nullptr);
+    vkDestroyPipelineLayout(_device, _pipeline_layouts[pipeline_idx], nullptr);
+  });
+
+  return true;
+}
+
+bool Renderer::load_mesh(Mesh &mesh) {
+  VkBufferCreateInfo buffer_info = {};
+  buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+  // How much space do we need
+  buffer_info.size = mesh._vertices.size() * sizeof(VertexInfo);
+  buffer_info.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+
+  // Writing buffer from CPU to GPU
+  VmaAllocationCreateInfo vmaalloc_info = {};
+  vmaalloc_info.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+
+  // Fill allocation buffer of the mesh object
+  VK_CHECK(vmaCreateBuffer(_vb_allocator, &buffer_info, &vmaalloc_info,
+                           &mesh._vertex_buffer._buffer,
+                           &mesh._vertex_buffer._allocation, nullptr),
+           "Failed to create vertex buffer");
+
+  // Destroy allocated buffer
+  _deallocator.push([=]() {
+    vmaDestroyBuffer(_vb_allocator, mesh._vertex_buffer._buffer,
+                     mesh._vertex_buffer._allocation);
+  });
+
+  void *data;
+  vmaMapMemory(_vb_allocator, mesh._vertex_buffer._allocation, &data);
+  memcpy(data, mesh._vertices.data(),
+         mesh._vertices.size() * sizeof(VertexInfo));
+  vmaUnmapMemory(_vb_allocator, mesh._vertex_buffer._allocation);
+
+  add_pipeline(mesh._shader, mesh._vertex_info_description);
+  _meshes.push_back(&mesh);
   return true;
 }

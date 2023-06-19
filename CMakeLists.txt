@@ -4,26 +4,22 @@ project(rend)
 
 set(CMAKE_CXX_STANDARD 17)
 
-add_compile_definitions(ASSET_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}")
+add_compile_definitions(ASSET_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/assets")
 
 find_package(Vulkan REQUIRED)
+find_package(assimp REQUIRED)
 
 add_subdirectory(vk-bootstrap)
 add_subdirectory(VulkanMemoryAllocator)
 
-set(${CMAKE_PROJECT_NAME}_SOURCES
-    rend/src/Renderer.cpp
-    rend/src/InputHandler.cpp
-    rend/src/Shader.cpp
-)
-
+# Shader compilation targets
 file(GLOB VERT_SHADER_SOURCES 
-    "shaders/*.vert"
+    "assets/shaders/*.vert"
     CONFIGUE_DEPENDS
 )
 
 file(GLOB  FRAG_SHADER_SOURCES 
-"shaders/*.frag"
+"assets/shaders/*.frag"
 CONFIGUE_DEPENDS
 )
 
@@ -43,16 +39,16 @@ foreach(SHADER_SOURCE ${SHADER_SOURCES})
     string(REPLACE "." "" EXT_NO_DOT ${SHADER_EXT})
     add_custom_target( ${SHADER_NAME_STEM}_${EXT_NO_DOT}_shader
         COMMAND glslangValidator 
-        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER_FILENAME} 
+        ${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/${SHADER_FILENAME} 
         -V 
         -o 
         ${SHADER_NAME_STEM}_${EXT_NO_DOT}.spv 
-        -I${CMAKE_CURRENT_SOURCE_DIR}/shaders/bin
+        -I${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/bin
         COMMENT "Compiling ${SHADER_NAME_STEM}_${EXT_NO_DOT}_shader"
     )
 
     add_custom_target( ${SHADER_NAME_STEM}_${EXT_NO_DOT}_shader_copy
-        COMMAND cp ${SHADER_NAME_STEM}_${EXT_NO_DOT}.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bin
+        COMMAND cp ${SHADER_NAME_STEM}_${EXT_NO_DOT}.spv ${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/bin
         COMMENT "Copying ${SHADER_NAME_STEM}_${EXT_NO_DOT}_shader"
         DEPENDS ${SHADER_NAME_STEM}_${EXT_NO_DOT}_shader
         
@@ -65,6 +61,13 @@ message(STATUS "Generated targets:\n ${SHADER_TARGETS}")
 message(STATUS "Sources:\n ${${CMAKE_PROJECT_NAME}_SOURCES}")
 
 # LIB
+set(${CMAKE_PROJECT_NAME}_SOURCES
+    rend/src/Renderer.cpp
+    rend/src/InputHandler.cpp
+    rend/src/Shader.cpp
+    rend/src/Mesh.cpp    
+)
+
 add_library(${CMAKE_PROJECT_NAME} 
     ${${CMAKE_PROJECT_NAME}_SOURCES}
 )
@@ -72,6 +75,7 @@ add_library(${CMAKE_PROJECT_NAME}
 target_include_directories(${CMAKE_PROJECT_NAME} PUBLIC
     ${Vulkan_INCLUDE_DIRS}
     ${SDL2_INCLUDE_DIRS}
+    VulkanMemoryAllocator/include
     rend/include/
     vk-bootstrap/src
 )
@@ -80,6 +84,8 @@ target_link_libraries(${CMAKE_PROJECT_NAME}  PUBLIC
     ${Vulkan_LIBRARIES}
     /usr/lib/x86_64-linux-gnu/libSDL2.so
     vk-bootstrap::vk-bootstrap
+    VulkanMemoryAllocator
+    assimp
 )
 
 add_dependencies(${CMAKE_PROJECT_NAME} ${SHADER_TARGETS})

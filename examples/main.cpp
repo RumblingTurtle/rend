@@ -1,4 +1,5 @@
 #include <InputHandler.h>
+#include <Mesh.h>
 #include <Renderer.h>
 
 int main() {
@@ -9,8 +10,10 @@ int main() {
   }
 
   InputHandler input_handler;
-
-  // Move polling to a different thread?
+  Mesh m;
+  m.load(Path{ASSET_DIRECTORY} / Path{"models/dingus.fbx"});
+  renderer.load_mesh(m);
+  //  Move polling to a different thread?
   while (input_handler.poll() && renderer.draw()) {
   }
 

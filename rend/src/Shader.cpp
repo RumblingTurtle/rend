@@ -48,7 +48,7 @@ bool Shader::init(Path vertex_path, Path fragment_path) {
   return true;
 }
 
-bool Shader::build_shader_modules(VkDevice _device) {
+bool Shader::build_shader_modules(VkDevice &_device) {
   _built_modules = true;
   VkShaderModuleCreateInfo vertex_info{};
   vertex_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -69,7 +69,7 @@ bool Shader::build_shader_modules(VkDevice _device) {
   return true;
 }
 
-void Shader::deinit(VkDevice _device) {
+void Shader::deinit(VkDevice &_device) {
   if (_built_modules) {
     vkDestroyShaderModule(_device, _vertex_module, nullptr);
     vkDestroyShaderModule(_device, _fragment_module, nullptr);

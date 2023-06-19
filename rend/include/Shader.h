@@ -17,6 +17,7 @@ class Shader {
   std::vector<uint32_t> _fragment_code;
 
   bool _built_modules = false;
+  bool _default_shader = true; // True if shader code was loaded
 
   // Generic shader module creation
   VkPipelineShaderStageCreateInfo
@@ -24,13 +25,25 @@ class Shader {
                         VkShaderModule shaderModule);
 
 public:
+  Shader(Path vertex_path, Path fragment_path) {
+    init(vertex_path, fragment_path);
+    _default_shader = false;
+  }
+
+  Shader() {
+    init(ASSET_DIRECTORY + std::string{"/shaders/bin/default_mesh_vert.spv"},
+         ASSET_DIRECTORY + std::string{"/shaders/bin/default_mesh_frag.spv"});
+  }
+
   // Load shader code from file
   bool init(Path vertex_path, Path fragment_path);
 
   // Destroy shader modules
-  void deinit(VkDevice _device);
+  void deinit(VkDevice &_device);
 
-  bool build_shader_modules(VkDevice _device);
+  bool default_shader() { return _default_shader; }
+
+  bool build_shader_modules(VkDevice &_device);
 
   VkPipelineShaderStageCreateInfo get_vertex_shader_stage_info();
 
