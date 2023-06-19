@@ -8,6 +8,7 @@ add_compile_definitions(ASSET_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/assets")
 
 find_package(Vulkan REQUIRED)
 find_package(assimp REQUIRED)
+find_package(Eigen3 REQUIRED)
 
 add_subdirectory(vk-bootstrap)
 add_subdirectory(VulkanMemoryAllocator)
@@ -75,6 +76,7 @@ add_library(${CMAKE_PROJECT_NAME}
 target_include_directories(${CMAKE_PROJECT_NAME} PUBLIC
     ${Vulkan_INCLUDE_DIRS}
     ${SDL2_INCLUDE_DIRS}
+    ${EIGEN3_INCLUDE_DIR}
     VulkanMemoryAllocator/include
     rend/include/
     vk-bootstrap/src

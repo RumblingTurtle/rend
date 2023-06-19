@@ -1,6 +1,7 @@
 #pragma once
 #include "vk_mem_alloc.h"
 #include <Mesh.h>
+#include <Object.h>
 #include <RenderPipelineBuilder.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_vulkan.h>
@@ -10,11 +11,12 @@
 #include <functional>
 #include <iostream>
 #include <macros.h>
+#include <memory>
 #include <vector>
 #include <vulkan/vulkan.h>
 
 class Renderer {
-  VkExtent2D _window_dims{500, 500};
+  VkExtent2D _window_dims{1000, 1000};
   SDL_Window *_window;
   VkInstance _instance;
   VkPhysicalDevice _physical_device;
@@ -60,7 +62,12 @@ class Renderer {
   // Vertex buffer allocator
   VmaAllocator _vb_allocator;
 
-  std::vector<Mesh *> _meshes;
+  // This is not the best way to organize things. But adding a proper ECS not
+  // prioritized for now. A better way would be to add renderable components to
+  // entities which would map to unique resource ID's which would save up memory
+  std::vector<std::shared_ptr<Mesh>> _meshes;
+  std::vector<std::shared_ptr<Object>> _objects;
+
   struct Deallocator {
     std::deque<std::function<void()>> _deletion_queue;
     void push(std::function<void()> &&function) {
@@ -76,7 +83,12 @@ class Renderer {
   } _deallocator;
 
 public:
-  Renderer() = default;
+  std::unique_ptr<Camera> _camera;
+
+  Renderer() {
+    _camera = std::make_unique<Camera>(
+        90.f, _window_dims.width / _window_dims.height, 0.1f, 200.0f);
+  };
 
   ~Renderer();
 
@@ -97,9 +109,11 @@ public:
   bool init_pipelines();
 
   bool add_pipeline(Shader &shader,
-                    VertexInfoDescription &vertex_info_description);
+                    VertexInfoDescription &vertex_info_description,
+                    VkPushConstantRange &push_constant_range);
 
-  bool load_mesh(Mesh &mesh);
+  bool load_mesh(std::shared_ptr<Mesh> p_mesh,
+                 std::shared_ptr<Object> p_object);
 
   bool draw();
 };

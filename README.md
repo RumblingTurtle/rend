@@ -17,13 +17,12 @@ This is a repo for a simple Vulkan based rederer. It may be used as a boilerplat
 - Vulkan
 - glslangValidator
 - assimp
-```
-sudo apt install assimp-utils
-```
 - VMA
+- Eigen
+
 ```
-sudo apt-get install libvma-utils
-```
+sudo apt install assimp-utils libvma-utils libeigen3-dev glslang-tools
+``` 
 
 Bootstrapping and buffer allocation is handled by submodules. Namely vk-bootstrap (https://github.com/charles-lunarg/vk-bootstrap) and VMA (https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git)
 ## Building

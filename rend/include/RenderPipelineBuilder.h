@@ -6,21 +6,27 @@
 #include <vulkan/vulkan.h>
 
 class RenderPipelineBuilder {
-  std::vector<VkPipelineShaderStageCreateInfo> _shaderStages;
-  VkPipelineVertexInputStateCreateInfo _vertexInputInfo;
-  VkPipelineInputAssemblyStateCreateInfo _inputAssembly;
-  VkPipelineRasterizationStateCreateInfo _rasterizer;
-  VkPipelineColorBlendAttachmentState _colorBlendAttachment;
-  VkPipelineMultisampleStateCreateInfo _multisampling;
-  VkPipelineColorBlendStateCreateInfo _colorBlending;
-  VkPipelineViewportStateCreateInfo _viewportState;
+  std::vector<VkPipelineShaderStageCreateInfo> _shaderStages{};
+  VkPipelineVertexInputStateCreateInfo _vertexInputInfo{};
+  VkPipelineInputAssemblyStateCreateInfo _inputAssembly{};
+  VkPipelineRasterizationStateCreateInfo _rasterizer{};
+  VkPipelineColorBlendAttachmentState _colorBlendAttachment{};
+  VkPipelineMultisampleStateCreateInfo _multisampling{};
+  VkPipelineColorBlendStateCreateInfo _colorBlending{};
+  VkPipelineViewportStateCreateInfo _viewportState{};
   VkViewport _viewport;
   VkRect2D _scissor;
 
 public:
-  void build_pipeline_layout(VkDevice &_device, VkPipelineLayout &layout) {
+  void build_pipeline_layout(VkDevice &_device, VkPipelineLayout &layout,
+                             VkPushConstantRange &push_constant_range) {
     VkPipelineLayoutCreateInfo pipeline_layout_info =
         get_pipeline_layout_create_info();
+
+    if (push_constant_range.size != 0) {
+      pipeline_layout_info.pPushConstantRanges = &push_constant_range;
+      pipeline_layout_info.pushConstantRangeCount = 1;
+    }
 
     if (vkCreatePipelineLayout(_device, &pipeline_layout_info, nullptr,
                                &layout) != VK_SUCCESS) {
@@ -84,6 +90,7 @@ public:
 
     _viewportState.sType =
         VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    _viewportState.flags = 0;
     _viewportState.pNext = nullptr;
 
     _viewportState.viewportCount = 1;
@@ -97,6 +104,7 @@ public:
     // the blending is just "no blend", but we do write to the color attachment
     _colorBlending.sType =
         VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    _colorBlending.flags = 0;
     _colorBlending.pNext = nullptr;
     _colorBlending.logicOpEnable = VK_FALSE;
     _colorBlending.logicOp = VK_LOGIC_OP_COPY;
@@ -152,6 +160,7 @@ public:
   void set_rasterization_state_create_info(VkPolygonMode polygonMode) {
     _rasterizer.sType =
         VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    _rasterizer.flags = 0;
     _rasterizer.pNext = nullptr;
 
     // Z value of the fragment can be clamped
@@ -177,6 +186,7 @@ public:
   void set_multisampling_state_create_info() {
     _multisampling.sType =
         VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    _multisampling.flags = 0;
     _multisampling.pNext = nullptr;
 
     _multisampling.sampleShadingEnable = VK_FALSE;

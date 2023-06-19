@@ -284,17 +284,30 @@ bool Renderer::draw() {
   //                    _pipelines[0]);
   //  vkCmdDraw(_cmd_buffer, 3, 1, 0, 0);
   //}
+  Eigen::Matrix4f projection = _camera->get_projection_matrix();
+  Eigen::Matrix4f view = _camera->get_view_matrix();
+
+  Mesh::ShaderConstants constants;
+  memcpy(constants.view, view.data(), sizeof(float) * 16);
+  memcpy(constants.projection, projection.data(), sizeof(float) * 16);
 
   for (int m_idx = 0; m_idx < _meshes.size(); m_idx++) {
-    Mesh *mesh = _meshes[m_idx];
-
     vkCmdBindPipeline(_cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                       _pipelines[m_idx + 1]);
 
     VkDeviceSize offset = 0;
-    vkCmdBindVertexBuffers(_cmd_buffer, 0, 1, &mesh->_vertex_buffer._buffer,
-                           &offset);
-    vkCmdDraw(_cmd_buffer, mesh->_vertices.size(), 1, 0, 0);
+    vkCmdBindVertexBuffers(_cmd_buffer, 0, 1,
+                           &_meshes[m_idx]->_vertex_buffer._buffer, &offset);
+
+    Eigen::Matrix4f model = _objects[m_idx]->get_model_matrix();
+
+    memcpy(constants.model, model.data(), sizeof(float) * 16);
+
+    vkCmdPushConstants(_cmd_buffer, _pipeline_layouts[m_idx + 1],
+                       VK_SHADER_STAGE_VERTEX_BIT, 0,
+                       sizeof(Mesh::ShaderConstants), &constants);
+
+    vkCmdDraw(_cmd_buffer, _meshes[m_idx]->_vertices.size(), 1, 0, 0);
   }
 
   vkCmdEndRenderPass(_cmd_buffer);
@@ -356,13 +369,16 @@ bool Renderer::init_pipelines() {
       std::string{ASSET_DIRECTORY} + "/shaders/bin/triangle_vert.spv",
       std::string{ASSET_DIRECTORY} + "/shaders/bin/triangle_frag.spv"};
   VertexInfoDescription d{};
-  add_pipeline(_triangle_vertex_shader, d);
+  VkPushConstantRange push_constant = {};
+  push_constant.size = 0;
+  add_pipeline(_triangle_vertex_shader, d, push_constant);
 
   return true;
 }
 
 bool Renderer::add_pipeline(Shader &shader,
-                            VertexInfoDescription &vertex_info_description) {
+                            VertexInfoDescription &vertex_info_description,
+                            VkPushConstantRange &push_constant_range) {
 
   if (!shader.build_shader_modules(_device)) {
     return false;
@@ -370,7 +386,8 @@ bool Renderer::add_pipeline(Shader &shader,
 
   _pipeline_layouts.resize(_pipeline_layouts.size() + 1);
   _pipelines.resize(_pipelines.size() + 1);
-  _pipeline_builder.build_pipeline_layout(_device, _pipeline_layouts.back());
+  _pipeline_builder.build_pipeline_layout(_device, _pipeline_layouts.back(),
+                                          push_constant_range);
   _pipeline_builder.build_pipeline(_device, _render_pass, shader, _window_dims,
                                    _pipeline_layouts.back(),
                                    vertex_info_description, _pipelines.back());
@@ -387,11 +404,12 @@ bool Renderer::add_pipeline(Shader &shader,
   return true;
 }
 
-bool Renderer::load_mesh(Mesh &mesh) {
+bool Renderer::load_mesh(std::shared_ptr<Mesh> p_mesh,
+                         std::shared_ptr<Object> p_object) {
   VkBufferCreateInfo buffer_info = {};
   buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
   // How much space do we need
-  buffer_info.size = mesh._vertices.size() * sizeof(VertexInfo);
+  buffer_info.size = p_mesh->_vertices.size() * sizeof(VertexInfo);
   buffer_info.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
 
   // Writing buffer from CPU to GPU
@@ -400,23 +418,27 @@ bool Renderer::load_mesh(Mesh &mesh) {
 
   // Fill allocation buffer of the mesh object
   VK_CHECK(vmaCreateBuffer(_vb_allocator, &buffer_info, &vmaalloc_info,
-                           &mesh._vertex_buffer._buffer,
-                           &mesh._vertex_buffer._allocation, nullptr),
+                           &p_mesh->_vertex_buffer._buffer,
+                           &p_mesh->_vertex_buffer._allocation, nullptr),
            "Failed to create vertex buffer");
 
   // Destroy allocated buffer
   _deallocator.push([=]() {
-    vmaDestroyBuffer(_vb_allocator, mesh._vertex_buffer._buffer,
-                     mesh._vertex_buffer._allocation);
+    vmaDestroyBuffer(_vb_allocator, p_mesh->_vertex_buffer._buffer,
+                     p_mesh->_vertex_buffer._allocation);
   });
 
   void *data;
-  vmaMapMemory(_vb_allocator, mesh._vertex_buffer._allocation, &data);
-  memcpy(data, mesh._vertices.data(),
-         mesh._vertices.size() * sizeof(VertexInfo));
-  vmaUnmapMemory(_vb_allocator, mesh._vertex_buffer._allocation);
+  vmaMapMemory(_vb_allocator, p_mesh->_vertex_buffer._allocation, &data);
+  memcpy(data, p_mesh->_vertices.data(),
+         p_mesh->_vertices.size() * sizeof(VertexInfo));
+  vmaUnmapMemory(_vb_allocator, p_mesh->_vertex_buffer._allocation);
 
-  add_pipeline(mesh._shader, mesh._vertex_info_description);
-  _meshes.push_back(&mesh);
+  add_pipeline(p_mesh->_shader, p_mesh->_vertex_info_description,
+               p_mesh->_push_constant_range);
+
+  _meshes.push_back(p_mesh);
+  _objects.push_back(p_object);
+
   return true;
 }

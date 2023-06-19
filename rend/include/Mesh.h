@@ -3,6 +3,7 @@
 #include <macros.h>
 #include <types.h>
 
+#include <Eigen/Dense>
 #include <assimp/Importer.hpp>  // C++ importer interface
 #include <assimp/postprocess.h> // Post processing flags
 #include <assimp/scene.h>       // Output data structure
@@ -12,14 +13,26 @@ class Mesh {
   const aiMesh *mesh;
 
 public:
+  struct ShaderConstants {
+    float model[16];
+    float view[16];
+    float projection[16];
+  };
+
   Shader _shader;
   VertexInfoDescription _vertex_info_description;
   std::vector<VertexInfo> _vertices;
   AllocatedBuffer _vertex_buffer;
+  VkPushConstantRange _push_constant_range;
   Path _mesh_path;
 
   Mesh() {
     _vertex_info_description = VertexInfo::get_vertex_info_description();
+
+    _push_constant_range.offset = 0;
+    _push_constant_range.size = sizeof(ShaderConstants);
+    // Accessible only in the vertex shader
+    _push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
   }
 
   bool load(Path path, Path vert_shader = {}, Path frag_shader = {}) {
@@ -34,7 +47,7 @@ public:
     }
 
     Assimp::Importer importer;
-    scene = importer.ReadFile(path.native(), aiProcess_SortByPType);
+    scene = importer.ReadFile(path.native(), 0);
 
     uint32_t mNumMeshes = scene->mNumMeshes;
 

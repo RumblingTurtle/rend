@@ -1,0 +1,64 @@
+#pragma once
+#include <Eigen/Dense>
+
+// Naive implementation of entities
+struct Object {
+  Eigen::Vector3f _position;
+  Eigen::Vector3f _scale;
+  Eigen::Quaternionf _rotation;
+
+  Object() {
+    _position = Eigen::Vector3f::Zero();
+    _scale = Eigen::Vector3f::Ones();
+    _rotation = Eigen::Quaternionf::Identity();
+  }
+
+  Eigen::Matrix4f get_model_matrix() {
+    Eigen::Matrix4f model;
+    model.setIdentity();
+    model.block<3, 3>(0, 0) =
+        _rotation.toRotationMatrix() * _scale.asDiagonal();
+    model.block<3, 1>(0, 3) = _position.head<3>();
+    return model;
+  }
+};
+
+class Camera : public Object {
+  Eigen::Matrix4f _projection;
+
+public:
+  Camera(float fov, float aspect, float near, float far) {
+    assert(aspect > 0);
+    assert(far > near);
+    assert(near > 0);
+
+    _projection = Eigen::Matrix4f::Zero();
+    float e = 1 / std::tan(fov / 180 * M_PI_2);
+    _projection(0, 0) = e / aspect;
+    _projection(1, 1) = e;
+    _projection(2, 2) = (far + near) / (near - far);
+    _projection(3, 3) = 0.0;
+    _projection(3, 2) = -1.0;
+    _projection(2, 3) = (2.0 * far * near) / (near - far);
+  }
+
+  void lookat(const Eigen::Vector3f &at) {
+    Eigen::Matrix3f R;
+    R.col(2) = (at - _position).normalized();
+    R.col(0) = Eigen::Vector3f::UnitY().cross(R.col(2)).normalized();
+    R.col(1) = R.col(2).cross(R.col(0));
+    _rotation = Eigen::Quaternionf{R};
+  }
+
+  Eigen::Matrix4f get_view_matrix() {
+    Eigen::Matrix4f view = Eigen::Matrix4f::Identity();
+    view.block<3, 3>(0, 0) = _rotation.toRotationMatrix();
+    // Camera is looking in the negative z direction
+    view.col(2) *= -1;
+    view.col(1) *= -1;
+    view.block<3, 1>(0, 3) = _position.head<3>();
+    return view.inverse();
+  }
+
+  Eigen::Matrix4f get_projection_matrix() { return _projection; }
+};
