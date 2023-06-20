@@ -94,26 +94,41 @@ public:
 
   bool init();
 
+  // Initializes physical and logical devices + VBA
   bool init_vulkan();
 
+  // Allocates swapchain, it's image buffers and image views into the buffers
   bool init_swapchain();
 
+  // Initializes the command pool to be submitted to the graphics queue
   bool init_cmd_buffer();
 
+  // Defines the renderpass with all the subpasses and their attachments
   bool init_renderpass();
 
+  // Render passes work on framebuffers not directly on image views
   bool init_framebuffers();
 
+  // Initializes semaphores and fences for syncronization with the gpu
   bool init_sync_primitives();
 
+  // Goes through each object with a shader and creates a pipeline for it
+  // That includes it's layout, shader modules, vertex input, rasterization,
+  // etc.
   bool init_pipelines();
 
+  // Generic function for creating a pipeline
   bool add_pipeline(Shader &shader,
                     VertexInfoDescription &vertex_info_description,
                     VkPushConstantRange &push_constant_range);
 
+  // Generates a pipeline for a mesh
   bool load_mesh(std::shared_ptr<Mesh> p_mesh,
                  std::shared_ptr<Object> p_object);
+
+  bool begin_render_pass();
+
+  bool end_render_pass();
 
   bool draw();
 };

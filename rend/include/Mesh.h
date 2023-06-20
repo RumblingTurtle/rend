@@ -4,80 +4,39 @@
 #include <types.h>
 
 #include <Eigen/Dense>
-#include <assimp/Importer.hpp>  // C++ importer interface
-#include <assimp/postprocess.h> // Post processing flags
-#include <assimp/scene.h>       // Output data structure
+#include <assimp/Importer.hpp>
+#include <assimp/postprocess.h>
+#include <assimp/scene.h>
 
 class Mesh {
   const aiScene *scene;
   const aiMesh *mesh;
 
 public:
-  struct ShaderConstants {
+  struct ShaderConstants { // Push constants passed to the vertex shader
     float model[16];
     float view[16];
     float projection[16];
   };
 
+  struct VertexInfo {
+    float position[3];
+    float normal[3];
+    float uv[2];
+
+    static VertexInfoDescription get_vertex_info_description();
+  };
+
+  Path _mesh_path;
   Shader _shader;
-  VertexInfoDescription _vertex_info_description;
   std::vector<VertexInfo> _vertices;
+
+  VertexInfoDescription _vertex_info_description;
   AllocatedBuffer _vertex_buffer;
   VkPushConstantRange _push_constant_range;
-  Path _mesh_path;
 
-  Mesh() {
-    _vertex_info_description = VertexInfo::get_vertex_info_description();
+  Mesh();
 
-    _push_constant_range.offset = 0;
-    _push_constant_range.size = sizeof(ShaderConstants);
-    // Accessible only in the vertex shader
-    _push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-  }
-
-  bool load(Path path, Path vert_shader = {}, Path frag_shader = {}) {
-    if (path.native().size() == 0) {
-      std::cerr << "Mesh path is empty" << std::endl;
-      return false;
-    }
-    _mesh_path = path;
-
-    if (vert_shader.native().size() != 0 && frag_shader.native().size() != 0) {
-      _shader = Shader(vert_shader, frag_shader);
-    }
-
-    Assimp::Importer importer;
-    scene = importer.ReadFile(path.native(), 0);
-
-    uint32_t mNumMeshes = scene->mNumMeshes;
-
-    // If the import failed, report it
-    if (scene || mNumMeshes == 0) {
-      mesh = scene->mMeshes[0];
-      fill_vertex_info();
-      return true;
-    }
-
-    std::cerr << "Error loading mesh: " << path << std::endl;
-    return false;
-  }
-
-  bool fill_vertex_info() {
-    for (int v = 0; v < mesh->mNumVertices; v++) {
-      VertexInfo vertex;
-      vertex.position[0] = mesh->mVertices[v].x;
-      vertex.position[1] = mesh->mVertices[v].y;
-      vertex.position[2] = mesh->mVertices[v].z;
-
-      vertex.normal[0] = mesh->mNormals[v].x;
-      vertex.normal[1] = mesh->mNormals[v].y;
-      vertex.normal[2] = mesh->mNormals[v].z;
-
-      vertex.uv[0] = mesh->mTextureCoords[0][v].x;
-      vertex.uv[1] = mesh->mTextureCoords[0][v].y;
-
-      _vertices.push_back(vertex);
-    }
-    return true;
-  }
+  // Loads a mesh, it's shaders and fills the vertex info
+  bool load(Path path, Path vert_shader = {}, Path frag_shader = {});
 };
