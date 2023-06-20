@@ -3,22 +3,21 @@
 
 // Naive implementation of entities
 struct Object {
-  Eigen::Vector3f _position;
-  Eigen::Vector3f _scale;
-  Eigen::Quaternionf _rotation;
+  Eigen::Vector3f position;
+  Eigen::Vector3f scale;
+  Eigen::Quaternionf rotation;
 
   Object() {
-    _position = Eigen::Vector3f::Zero();
-    _scale = Eigen::Vector3f::Ones();
-    _rotation = Eigen::Quaternionf::Identity();
+    position = Eigen::Vector3f::Zero();
+    scale = Eigen::Vector3f::Ones();
+    rotation = Eigen::Quaternionf::Identity();
   }
 
   Eigen::Matrix4f get_model_matrix() {
     Eigen::Matrix4f model;
     model.setIdentity();
-    model.block<3, 3>(0, 0) =
-        _rotation.toRotationMatrix() * _scale.asDiagonal();
-    model.block<3, 1>(0, 3) = _position.head<3>();
+    model.block<3, 3>(0, 0) = rotation.toRotationMatrix() * scale.asDiagonal();
+    model.block<3, 1>(0, 3) = position.head<3>();
     return model;
   }
 };
@@ -44,19 +43,19 @@ public:
 
   void lookat(const Eigen::Vector3f &at) {
     Eigen::Matrix3f R;
-    R.col(2) = (at - _position).normalized();
+    R.col(2) = (at - position).normalized();
     R.col(0) = Eigen::Vector3f::UnitY().cross(R.col(2)).normalized();
     R.col(1) = R.col(2).cross(R.col(0));
-    _rotation = Eigen::Quaternionf{R};
+    rotation = Eigen::Quaternionf{R};
   }
 
   Eigen::Matrix4f get_view_matrix() {
     Eigen::Matrix4f view = Eigen::Matrix4f::Identity();
-    view.block<3, 3>(0, 0) = _rotation.toRotationMatrix();
+    view.block<3, 3>(0, 0) = rotation.toRotationMatrix();
     // Camera is looking in the negative z direction
     view.col(2) *= -1;
     view.col(1) *= -1;
-    view.block<3, 1>(0, 3) = _position.head<3>();
+    view.block<3, 1>(0, 3) = position.head<3>();
     return view.inverse();
   }
 

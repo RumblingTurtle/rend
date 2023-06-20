@@ -67,6 +67,8 @@ set(${CMAKE_PROJECT_NAME}_SOURCES
     rend/src/InputHandler.cpp
     rend/src/Shader.cpp
     rend/src/Mesh.cpp    
+    rend/src/Material.cpp  
+    rend/src/vma_impl.cpp  
 )
 
 add_library(${CMAKE_PROJECT_NAME} 

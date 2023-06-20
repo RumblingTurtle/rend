@@ -8,39 +8,28 @@
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
 
+#include <memory>
+#include <vk_mem_alloc.h>
+
 class Mesh {
-  const aiScene *scene;
-  const aiMesh *mesh;
+  // Contiguous chunk of vertices which is passed to the shader as is
+  std::vector<float> _vertices;
+  int _vertex_count = 0;
+  bool _buffer_generated = false;
 
 public:
-  struct ShaderConstants { // Push constants passed to the vertex shader
-    float model[16];
-    float view[16];
-    float projection[16];
-  };
-
-  struct VertexInfo {
-    float position[3];
-    float normal[3];
-    float uv[2];
-
-    static VertexInfoDescription get_vertex_info_description();
-  };
+  typedef std::shared_ptr<Mesh> Ptr;
 
   struct {
-    VkBuffer _buffer;
-    VmaAllocation _allocation;
-  } _vertex_buffer;
+    VkBuffer buffer;
+    VmaAllocation allocation;
+  } allocation_buffer;
 
   Path _mesh_path;
-  Shader _shader;
-  std::vector<VertexInfo> _vertices;
 
-  VertexInfoDescription _vertex_info_description;
-  VkPushConstantRange _push_constant_range;
-
-  Mesh();
-
-  // Loads a mesh, it's shaders and fills the vertex info
-  bool load(Path path, Path vert_shader = {}, Path frag_shader = {});
+  // Loads a mesh, it's shaders and fills the vertex buffer
+  bool load(Path path);
+  int vertex_count();
+  bool generate_allocation_buffer(VmaAllocator &allocator,
+                                  Deallocator &deallocator_queue);
 };

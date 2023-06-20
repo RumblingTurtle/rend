@@ -1,51 +1,31 @@
 #include <Mesh.h>
 
-Mesh::Mesh() {
-  _vertex_info_description = VertexInfo::get_vertex_info_description();
-
-  _push_constant_range.offset = 0;
-  _push_constant_range.size = sizeof(ShaderConstants);
-  // Accessible only in the vertex shader
-  _push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-}
-
-bool Mesh::load(Path path, Path vert_shader, Path frag_shader) {
+bool Mesh::load(Path path) {
   if (path.native().size() == 0) {
     std::cerr << "Mesh path is empty" << std::endl;
     return false;
   }
   _mesh_path = path;
 
-  if (vert_shader.native().size() != 0 && frag_shader.native().size() != 0) {
-    _shader = Shader(vert_shader, frag_shader);
-  }
-
   Assimp::Importer importer;
-  scene = importer.ReadFile(path.native(), aiProcess_Triangulate);
+  const aiScene *scene =
+      importer.ReadFile(path.native(), aiProcess_Triangulate);
 
-  uint32_t mNumMeshes = scene->mNumMeshes;
-
-  // If the import failed, report it
-  if (scene || mNumMeshes == 0) {
-    mesh = scene->mMeshes[0];
-    _vertices.resize(mesh->mNumFaces * 3);
-
+  if (scene || scene->mNumMeshes == 0) {
+    const aiMesh *mesh = scene->mMeshes[0];
+    _vertices.resize(mesh->mNumFaces * 24);
+    _vertex_count = mesh->mNumFaces * 3;
     for (int f = 0; f < mesh->mNumFaces; f++) {
       for (int v = 0; v < 3; v++) {
         int v_idx = mesh->mFaces[f].mIndices[v];
-        VertexInfo vertex;
-        vertex.position[0] = mesh->mVertices[v_idx].x;
-        vertex.position[1] = mesh->mVertices[v_idx].y;
-        vertex.position[2] = mesh->mVertices[v_idx].z;
-
-        vertex.normal[0] = mesh->mNormals[v_idx].x;
-        vertex.normal[1] = mesh->mNormals[v_idx].y;
-        vertex.normal[2] = mesh->mNormals[v_idx].z;
-
-        vertex.uv[0] = mesh->mTextureCoords[0][v_idx].x;
-        vertex.uv[1] = mesh->mTextureCoords[0][v_idx].y;
-
-        _vertices.push_back(vertex);
+        _vertices[f * 24 + v * 8 + 0] = mesh->mVertices[v_idx].x;
+        _vertices[f * 24 + v * 8 + 1] = mesh->mVertices[v_idx].y;
+        _vertices[f * 24 + v * 8 + 2] = mesh->mVertices[v_idx].z;
+        _vertices[f * 24 + v * 8 + 3] = mesh->mNormals[v_idx].x;
+        _vertices[f * 24 + v * 8 + 4] = mesh->mNormals[v_idx].y;
+        _vertices[f * 24 + v * 8 + 5] = mesh->mNormals[v_idx].z;
+        _vertices[f * 24 + v * 8 + 6] = mesh->mTextureCoords[0][v_idx].x;
+        _vertices[f * 24 + v * 8 + 7] = mesh->mTextureCoords[0][v_idx].y;
       }
     }
     return true;
@@ -55,37 +35,38 @@ bool Mesh::load(Path path, Path vert_shader, Path frag_shader) {
   return false;
 }
 
-VertexInfoDescription Mesh::VertexInfo::get_vertex_info_description() {
-  VertexInfoDescription description;
-  VkVertexInputBindingDescription mainBinding = {};
-  mainBinding.binding = 0;
-  mainBinding.stride = sizeof(VertexInfo);
-  mainBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-  description.bindings.push_back(mainBinding);
+int Mesh::vertex_count() { return _vertex_count; }
 
-  // Position will be stored at Location 0
-  VkVertexInputAttributeDescription position_attr = {};
-  position_attr.binding = 0;
-  position_attr.location = 0;
-  position_attr.format = VK_FORMAT_R32G32B32_SFLOAT;
-  position_attr.offset = offsetof(VertexInfo, position);
+bool Mesh::generate_allocation_buffer(VmaAllocator &allocator,
+                                      Deallocator &deallocator_queue) {
+  if (_buffer_generated) {
+    return true;
+  }
+  VkBufferCreateInfo buffer_info = {};
+  buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+  buffer_info.size = _vertices.size() * sizeof(float);
+  buffer_info.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
 
-  // Normal will be stored at Location 1
-  VkVertexInputAttributeDescription normal_attr = {};
-  normal_attr.binding = 0;
-  normal_attr.location = 1;
-  normal_attr.format = VK_FORMAT_R32G32B32_SFLOAT;
-  normal_attr.offset = offsetof(VertexInfo, normal);
+  // Writing buffer from CPU to GPU
+  VmaAllocationCreateInfo vmaalloc_info = {};
+  vmaalloc_info.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
 
-  // UV coords will be stored at Location 2
-  VkVertexInputAttributeDescription uv_attr = {};
-  uv_attr.binding = 0;
-  uv_attr.location = 2;
-  uv_attr.format = VK_FORMAT_R32G32_SFLOAT;
-  uv_attr.offset = offsetof(VertexInfo, uv);
+  // Fill allocation buffer of the mesh object
+  VK_CHECK(vmaCreateBuffer(allocator, &buffer_info, &vmaalloc_info,
+                           &allocation_buffer.buffer,
+                           &allocation_buffer.allocation, nullptr),
+           "Failed to create vertex buffer");
 
-  description.attributes.push_back(position_attr);
-  description.attributes.push_back(normal_attr);
-  description.attributes.push_back(uv_attr);
-  return description;
+  // Destroy allocated buffer
+  deallocator_queue.push([=]() {
+    vmaDestroyBuffer(allocator, allocation_buffer.buffer,
+                     allocation_buffer.allocation);
+  });
+
+  void *data;
+  vmaMapMemory(allocator, allocation_buffer.allocation, &data);
+  memcpy(data, _vertices.data(), _vertices.size() * sizeof(float));
+  vmaUnmapMemory(allocator, allocation_buffer.allocation);
+  _buffer_generated = true;
+  return true;
 }

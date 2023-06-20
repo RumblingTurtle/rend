@@ -1,4 +1,5 @@
 #include <InputHandler.h>
+#include <Material.h>
 #include <Mesh.h>
 #include <Object.h>
 #include <Renderer.h>
@@ -14,19 +15,25 @@ int main() {
       std::chrono::high_resolution_clock::now();
 
   InputHandler input_handler;
-  std::shared_ptr<Mesh> m = std::make_shared<Mesh>();
-  std::shared_ptr<Object> o = std::make_shared<Object>();
-  m->load(Path{ASSET_DIRECTORY} / Path{"models/dingus.fbx"});
-  renderer.load_mesh(m, o);
-  o->_scale = Eigen::Vector3f{0.5f, 0.5f, 0.5f};
+  std::shared_ptr<Mesh> mesh = std::make_shared<Mesh>();
+  mesh->load(Path{ASSET_DIRECTORY} / Path{"models/dingus.fbx"});
 
-  std::shared_ptr<Mesh> m2 = std::make_shared<Mesh>();
-  m2->load(Path{ASSET_DIRECTORY} / Path{"models/dingus.fbx"});
-  std::shared_ptr<Object> o2 = std::make_shared<Object>();
-  renderer.load_mesh(m2, o2);
-  o2->_rotation =
+  std::shared_ptr<Material> mat = std::make_shared<Material>();
+
+  Renderable::Ptr renderable1 = std::make_shared<Renderable>();
+  renderable1->p_material = mat;
+  renderable1->p_mesh = mesh;
+  renderable1->object.scale = Eigen::Vector3f{0.5f, 0.5f, 0.5f};
+
+  Renderable::Ptr renderable2 = std::make_shared<Renderable>();
+  renderable2->p_material = mat;
+  renderable2->p_mesh = mesh;
+  renderable2->object.rotation =
       Eigen::Quaternionf{Eigen::AngleAxisf{-M_PI_2, Eigen::Vector3f::UnitX()}};
-  o2->_scale = Eigen::Vector3f{0.2f, 0.2f, 0.2f};
+  renderable2->object.scale = Eigen::Vector3f{0.2f, 0.2f, 0.2f};
+
+  renderer.load_renderable(renderable1);
+  renderer.load_renderable(renderable2);
 
   while (input_handler.poll() && renderer.draw()) {
     std::chrono::high_resolution_clock::time_point t2 =
@@ -34,15 +41,14 @@ int main() {
     float time =
         std::chrono::duration_cast<std::chrono::duration<float>>(t2 - t1)
             .count();
-    o->_rotation = Eigen::Quaternionf{
+    renderable1->object.rotation = Eigen::Quaternionf{
         Eigen::AngleAxisf{time, Eigen::Vector3f::UnitY()} *
         Eigen::AngleAxisf{-M_PI_2, Eigen::Vector3f::UnitX()}};
-
-    o->_position =
+    renderable1->object.position =
         Eigen::Vector3f{20 * std::cos(time), 0.5f + std::cos(time), 0.0f};
 
-    renderer._camera->_position = Eigen::Vector3f{0.0f, 5.0f, -20.0f};
-    renderer._camera->lookat(o->_position);
+    renderer.camera->position = Eigen::Vector3f{0.0f, 5.0f, -20.0f};
+    renderer.camera->lookat(renderable1->object.position);
   }
 
   return 0;

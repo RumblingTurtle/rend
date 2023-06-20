@@ -1,20 +1,21 @@
 #pragma once
-#include "vk_mem_alloc.h"
 #include <Mesh.h>
 #include <Object.h>
 #include <RenderPipelineBuilder.h>
+#include <Renderable.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_vulkan.h>
 #include <VkBootstrap.h>
-#include <deque>
 #include <exception>
-#include <functional>
 #include <iostream>
 #include <macros.h>
+#include <map>
 #include <memory>
 #include <vector>
 #include <vk_struct_init.h>
 #include <vulkan/vulkan.h>
+
+#include <vk_mem_alloc.h>
 
 class Renderer {
   VkExtent2D _window_dims{1000, 1000};
@@ -58,44 +59,21 @@ class Renderer {
   VkSemaphore _render_complete_semaphore; // Signaled when rendering is done
   VkFence _command_complete_fence; // Fence for waiting on the command queue
 
-  // Triangle rendering layout
-  std::vector<VkPipelineLayout> _pipeline_layouts;
-  std::vector<VkPipeline> _pipelines;
-
-  int frame_number = 0;
-
-  RenderPipelineBuilder _pipeline_builder;
-
-  bool initialized = false;
-
   // VMA allocator
   VmaAllocator _allocator;
 
-  // This is not the best way to organize things. But adding a proper ECS not
-  // prioritized for now. A better way would be to add renderable components to
-  // entities which would map to unique resource ID's which would save up memory
-  std::vector<std::shared_ptr<Mesh>> _meshes;
-  std::vector<std::shared_ptr<Object>> _objects;
+  std::map<Material *, std::vector<Renderable::Ptr>> _renderables;
 
-  struct Deallocator {
-    std::deque<std::function<void()>> _deletion_queue;
-    void push(std::function<void()> &&function) {
-      _deletion_queue.push_back(std::move(function));
-    }
+  Deallocator _deallocator;
 
-    ~Deallocator() {
-      while (!_deletion_queue.empty()) {
-        _deletion_queue.back()();
-        _deletion_queue.pop_back();
-      }
-    }
-  } _deallocator;
+  int _frame_number = 0;
+  bool _initialized = false;
 
 public:
-  std::unique_ptr<Camera> _camera;
+  std::unique_ptr<Camera> camera;
 
   Renderer() {
-    _camera = std::make_unique<Camera>(
+    camera = std::make_unique<Camera>(
         90.f, _window_dims.width / _window_dims.height, 0.1f, 200.0f);
   };
 
@@ -124,20 +102,11 @@ public:
   // Initializes semaphores and fences for syncronization with the gpu
   bool init_sync_primitives();
 
-  // Goes through each object with a shader and creates a pipeline for it
-  // That includes it's layout, shader modules, vertex input, rasterization,
-  // etc.
-  bool init_pipelines();
+  // Registers renderable object to the render queue
+  bool load_renderable(Renderable::Ptr renderable);
 
-  // Generic function for creating a pipeline
-  bool add_pipeline(Shader &shader,
-                    VertexInfoDescription &vertex_info_description,
-                    VkPushConstantRange &push_constant_range);
-
-  // Generates a pipeline for a mesh
-  bool load_mesh(std::shared_ptr<Mesh> p_mesh,
-                 std::shared_ptr<Object> p_object);
-
+  // Checks if all submited materials are built
+  bool check_materials();
   bool begin_render_pass();
 
   bool end_render_pass();

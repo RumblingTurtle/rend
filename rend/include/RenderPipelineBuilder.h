@@ -16,28 +16,28 @@ class RenderPipelineBuilder {
   VkPipelineColorBlendStateCreateInfo _colorBlending{};
   VkPipelineViewportStateCreateInfo _viewportState{};
   VkPipelineDepthStencilStateCreateInfo _depth_stencil_create_info{};
+  VkPipelineLayoutCreateInfo pipeline_layout_info{};
   VkViewport _viewport;
   VkRect2D _scissor;
 
 public:
-  void build_pipeline_layout(VkDevice &_device, VkPipelineLayout &layout,
-                             VkPushConstantRange &push_constant_range) {
-    VkPipelineLayoutCreateInfo pipeline_layout_info =
-        get_pipeline_layout_create_info();
-
+  void build_pipeline_layout(VkDevice &_device,
+                             VkPushConstantRange &push_constant_range,
+                             VkPipelineLayout &layout_out) {
+    pipeline_layout_info = get_pipeline_layout_create_info();
     if (push_constant_range.size != 0) {
       pipeline_layout_info.pPushConstantRanges = &push_constant_range;
       pipeline_layout_info.pushConstantRangeCount = 1;
     }
 
     if (vkCreatePipelineLayout(_device, &pipeline_layout_info, nullptr,
-                               &layout) != VK_SUCCESS) {
+                               &layout_out) != VK_SUCCESS) {
       std::cerr << "Failed to create pipeline layout" << std::endl;
     }
   }
 
   void build_pipeline(VkDevice &device, VkRenderPass &render_pass,
-                      Shader &shader, VkExtent2D extent,
+                      VkExtent2D extent, Shader &shader,
                       VkPipelineLayout &_pipeline_layout,
                       VertexInfoDescription &vertex_info_description,
                       VkPipeline &newPipeline) {

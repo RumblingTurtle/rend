@@ -1,7 +1,7 @@
-#include "Renderer.h"
+#include <Renderer.h>
 
 Renderer::~Renderer() {
-  if (!initialized)
+  if (!_initialized)
     return;
 
   // Wait for the command queue to complete if still running
@@ -20,10 +20,10 @@ bool Renderer::init() {
     return false;
   }
 
-  initialized = init_vulkan() && init_swapchain() && init_z_buffer() &&
-                init_cmd_buffer() && init_renderpass() && init_framebuffers() &&
-                init_sync_primitives() && init_pipelines();
-  return initialized;
+  _initialized = init_vulkan() && init_swapchain() && init_z_buffer() &&
+                 init_cmd_buffer() && init_renderpass() &&
+                 init_framebuffers() && init_sync_primitives();
+  return _initialized;
 }
 
 bool Renderer::init_vulkan() {
@@ -313,84 +313,12 @@ bool Renderer::init_sync_primitives() {
   return true;
 }
 
-bool Renderer::init_pipelines() {
-  Shader _triangle_vertex_shader{
-      std::string{ASSET_DIRECTORY} + "/shaders/bin/triangle_vert.spv",
-      std::string{ASSET_DIRECTORY} + "/shaders/bin/triangle_frag.spv"};
-  VertexInfoDescription d{};
-  VkPushConstantRange push_constant = {};
-  push_constant.size = 0;
-  add_pipeline(_triangle_vertex_shader, d, push_constant);
-
-  return true;
-}
-
-bool Renderer::add_pipeline(Shader &shader,
-                            VertexInfoDescription &vertex_info_description,
-                            VkPushConstantRange &push_constant_range) {
-
-  if (!shader.build_shader_modules(_device)) {
-    return false;
+bool Renderer::load_renderable(Renderable::Ptr renderable) {
+  if (_renderables.find(renderable->p_material.get()) == _renderables.end()) {
+    _renderables[renderable->p_material.get()] = std::vector<Renderable::Ptr>();
   }
-
-  _pipeline_layouts.resize(_pipeline_layouts.size() + 1);
-  _pipelines.resize(_pipelines.size() + 1);
-  _pipeline_builder.build_pipeline_layout(_device, _pipeline_layouts.back(),
-                                          push_constant_range);
-  _pipeline_builder.build_pipeline(_device, _render_pass, shader, _window_dims,
-                                   _pipeline_layouts.back(),
-                                   vertex_info_description, _pipelines.back());
-
-  // Shader modules can be destroyed after pipeline creation
-  shader.deinit(_device);
-
-  int pipeline_idx = _pipelines.size() - 1;
-  _deallocator.push([=] {
-    vkDestroyPipeline(_device, _pipelines[pipeline_idx], nullptr);
-    vkDestroyPipelineLayout(_device, _pipeline_layouts[pipeline_idx], nullptr);
-  });
-
-  return true;
-}
-
-bool Renderer::load_mesh(std::shared_ptr<Mesh> p_mesh,
-                         std::shared_ptr<Object> p_object) {
-  VkBufferCreateInfo buffer_info = {};
-  buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-  // How much space do we need
-  buffer_info.size = p_mesh->_vertices.size() * sizeof(Mesh::VertexInfo);
-  buffer_info.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-
-  // Writing buffer from CPU to GPU
-  VmaAllocationCreateInfo vmaalloc_info = {};
-  vmaalloc_info.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
-
-  // Fill allocation buffer of the mesh object
-  VK_CHECK(vmaCreateBuffer(_allocator, &buffer_info, &vmaalloc_info,
-                           &p_mesh->_vertex_buffer._buffer,
-                           &p_mesh->_vertex_buffer._allocation, nullptr),
-           "Failed to create vertex buffer");
-
-  // Destroy allocated buffer
-  _deallocator.push([=]() {
-    vmaDestroyBuffer(_allocator, p_mesh->_vertex_buffer._buffer,
-                     p_mesh->_vertex_buffer._allocation);
-  });
-
-  void *data;
-  vmaMapMemory(_allocator, p_mesh->_vertex_buffer._allocation, &data);
-  memcpy(data, p_mesh->_vertices.data(),
-         p_mesh->_vertices.size() * sizeof(Mesh::VertexInfo));
-  vmaUnmapMemory(_allocator, p_mesh->_vertex_buffer._allocation);
-
-  if (_pipelines.size() == 1) { // Limiting pipeline creation to 2
-    add_pipeline(p_mesh->_shader, p_mesh->_vertex_info_description,
-                 p_mesh->_push_constant_range);
-  }
-
-  _meshes.push_back(p_mesh);
-  _objects.push_back(p_object);
-
+  renderable->p_mesh->generate_allocation_buffer(_allocator, _deallocator);
+  _renderables[renderable->p_material.get()].push_back(renderable);
   return true;
 }
 
@@ -492,43 +420,50 @@ bool Renderer::end_render_pass() {
   return true;
 }
 
+bool Renderer::check_materials() {
+  for (auto &pair : _renderables) {
+    pair.first->build_pipeline(_device, _render_pass, _window_dims,
+                               _deallocator);
+  }
+  return true;
+}
+
 bool Renderer::draw() {
+  check_materials();
+
   begin_render_pass();
 
-  // Binding first pipeline which is a single triangle
-  //{
-  //  vkCmdBindPipeline(_cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-  //                    _pipelines[0]);
-  //  vkCmdDraw(_cmd_buffer, 3, 1, 0, 0);
-  //}
+  Eigen::Matrix4f projection = camera->get_projection_matrix();
+  Eigen::Matrix4f view = camera->get_view_matrix();
 
-  Eigen::Matrix4f projection = _camera->get_projection_matrix();
-  Eigen::Matrix4f view = _camera->get_view_matrix();
+  Material::PushConstants constants;
+  memcpy(constants.view, view.data(), sizeof(float) * view.size());
+  memcpy(constants.projection, projection.data(),
+         sizeof(float) * projection.size());
 
-  Mesh::ShaderConstants constants;
-  memcpy(constants.view, view.data(), sizeof(float) * 16);
-  memcpy(constants.projection, projection.data(), sizeof(float) * 16);
+  for (auto &pair : _renderables) {
+    Material *material = pair.first;
+    vkCmdBindPipeline(_cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      material->pipeline);
 
-  vkCmdBindPipeline(_cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                    _pipelines[1]);
-  for (int m_idx = 0; m_idx < _meshes.size(); m_idx++) {
-    VkDeviceSize offset = 0;
-    vkCmdBindVertexBuffers(_cmd_buffer, 0, 1,
-                           &_meshes[m_idx]->_vertex_buffer._buffer, &offset);
+    for (Renderable::Ptr p_renderable : pair.second) {
+      VkDeviceSize offset = 0;
+      vkCmdBindVertexBuffers(_cmd_buffer, 0, 1,
+                             &p_renderable->p_mesh->allocation_buffer.buffer,
+                             &offset);
 
-    Eigen::Matrix4f model = _objects[m_idx]->get_model_matrix();
+      Eigen::Matrix4f model = p_renderable->object.get_model_matrix();
+      memcpy(constants.model, model.data(), sizeof(float) * model.size());
+      vkCmdPushConstants(_cmd_buffer, material->pipeline_layout,
+                         VK_SHADER_STAGE_VERTEX_BIT, 0,
+                         sizeof(Material::PushConstants), &constants);
 
-    memcpy(constants.model, model.data(), sizeof(float) * 16);
-
-    vkCmdPushConstants(_cmd_buffer, _pipeline_layouts[1],
-                       VK_SHADER_STAGE_VERTEX_BIT, 0,
-                       sizeof(Mesh::ShaderConstants), &constants);
-
-    vkCmdDraw(_cmd_buffer, _meshes[m_idx]->_vertices.size(), 1, 0, 0);
+      vkCmdDraw(_cmd_buffer, p_renderable->p_mesh->vertex_count(), 1, 0, 0);
+    }
   }
 
   end_render_pass();
 
-  frame_number++;
+  _frame_number++;
   return true;
 }
