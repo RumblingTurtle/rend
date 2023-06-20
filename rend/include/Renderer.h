@@ -13,6 +13,7 @@
 #include <macros.h>
 #include <memory>
 #include <vector>
+#include <vk_struct_init.h>
 #include <vulkan/vulkan.h>
 
 class Renderer {
@@ -32,6 +33,14 @@ class Renderer {
   std::vector<VkImage> _swapchain_images;
   std::vector<VkImageView> _swapchain_image_views;
   uint32_t _swapchain_img_idx; // Current swapchain image index
+
+  // Depth buffer
+  VkImageView _depth_image_view;
+  struct {
+    VkImage image;
+    VmaAllocation allocation;
+    VkFormat format = VK_FORMAT_D32_SFLOAT;
+  } _depth_image;
 
   // CMD buffer
   VkCommandPool _cmd_pool;
@@ -59,8 +68,8 @@ class Renderer {
 
   bool initialized = false;
 
-  // Vertex buffer allocator
-  VmaAllocator _vb_allocator;
+  // VMA allocator
+  VmaAllocator _allocator;
 
   // This is not the best way to organize things. But adding a proper ECS not
   // prioritized for now. A better way would be to add renderable components to
@@ -99,6 +108,9 @@ public:
 
   // Allocates swapchain, it's image buffers and image views into the buffers
   bool init_swapchain();
+
+  // Allocates the depth image and it't view
+  bool init_z_buffer();
 
   // Initializes the command pool to be submitted to the graphics queue
   bool init_cmd_buffer();

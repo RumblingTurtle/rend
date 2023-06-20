@@ -17,6 +17,7 @@ void main() {
   mat4 model_view = PushConstant.view * PushConstant.model;
   gl_Position = PushConstant.projection * model_view * vec4(vPosition, 1.0f);
 
-  normal = model_view * vec4(vNormal, 1.0f);
-  normal = normal / length(normal);
+  mat3 rotation = mat3(model_view);
+  normal = vec4(rotation * vNormal.xyz, 1.0);
+  normal = normalize(normal);
 }

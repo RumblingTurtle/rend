@@ -12,8 +12,3 @@ struct VertexInfoDescription {
   std::vector<VkVertexInputAttributeDescription> attributes;
   VkPipelineVertexInputStateCreateFlags flags = 0;
 };
-
-struct AllocatedBuffer {
-  VkBuffer _buffer;
-  VmaAllocation _allocation;
-};

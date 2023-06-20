@@ -3,6 +3,7 @@
 #include <iostream>
 #include <macros.h>
 #include <vector>
+#include <vk_struct_init.h>
 #include <vulkan/vulkan.h>
 
 class RenderPipelineBuilder {
@@ -14,6 +15,7 @@ class RenderPipelineBuilder {
   VkPipelineMultisampleStateCreateInfo _multisampling{};
   VkPipelineColorBlendStateCreateInfo _colorBlending{};
   VkPipelineViewportStateCreateInfo _viewportState{};
+  VkPipelineDepthStencilStateCreateInfo _depth_stencil_create_info{};
   VkViewport _viewport;
   VkRect2D _scissor;
 
@@ -39,6 +41,8 @@ public:
                       VkPipelineLayout &_pipeline_layout,
                       VertexInfoDescription &vertex_info_description,
                       VkPipeline &newPipeline) {
+    _depth_stencil_create_info = vk_struct_init::get_depth_stencil_create_info(
+        true, true, VK_COMPARE_OP_LESS_OR_EQUAL);
     set_vertex_input_state_create_info(vertex_info_description);
     set_input_assembly_create_info(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
     // Configure the rasterizer to draw filled triangles
@@ -65,6 +69,7 @@ public:
     pipelineInfo.pRasterizationState = &_rasterizer;
     pipelineInfo.pMultisampleState = &_multisampling;
     pipelineInfo.pColorBlendState = &_colorBlending;
+    pipelineInfo.pDepthStencilState = &_depth_stencil_create_info;
     pipelineInfo.layout = _pipeline_layout;
     pipelineInfo.renderPass = render_pass;
     pipelineInfo.subpass = 0;
@@ -172,8 +177,7 @@ public:
 
     _rasterizer.polygonMode = polygonMode;
     _rasterizer.lineWidth = 1.0f;
-    // No backface culling
-    _rasterizer.cullMode = VK_CULL_MODE_NONE;
+    _rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
     _rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
     // Depth values of a fragment can be offset by a constant
     _rasterizer.depthBiasEnable = VK_FALSE;

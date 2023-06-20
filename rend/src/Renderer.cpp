@@ -20,8 +20,8 @@ bool Renderer::init() {
     return false;
   }
 
-  initialized = init_vulkan() && init_swapchain() && init_cmd_buffer() &&
-                init_renderpass() && init_framebuffers() &&
+  initialized = init_vulkan() && init_swapchain() && init_z_buffer() &&
+                init_cmd_buffer() && init_renderpass() && init_framebuffers() &&
                 init_sync_primitives() && init_pipelines();
   return initialized;
 }
@@ -64,10 +64,10 @@ bool Renderer::init_vulkan() {
   allocatorInfo.physicalDevice = _physical_device;
   allocatorInfo.device = _device;
   allocatorInfo.instance = _instance;
-  vmaCreateAllocator(&allocatorInfo, &_vb_allocator);
+  vmaCreateAllocator(&allocatorInfo, &_allocator);
 
   _deallocator.push([=]() {
-    vmaDestroyAllocator(_vb_allocator);
+    vmaDestroyAllocator(_allocator);
     vkDestroyDevice(_device, nullptr);
     vkDestroySurfaceKHR(_instance, _surface, nullptr);
     vkb::destroy_debug_utils_messenger(_instance, _debug_messenger);
@@ -95,6 +95,34 @@ bool Renderer::init_swapchain() {
 
   _deallocator.push(
       [=] { vkDestroySwapchainKHR(_device, _swapchain, nullptr); });
+  return true;
+}
+
+bool Renderer::init_z_buffer() {
+  VkImageCreateInfo image_info = vk_struct_init::get_image_create_info(
+      _depth_image.format, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+      VkExtent3D{_window_dims.width, _window_dims.height, 1});
+
+  VmaAllocationCreateInfo alloc_info = {};
+  alloc_info.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+  alloc_info.requiredFlags =
+      VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+  vmaCreateImage(_allocator, &image_info, &alloc_info, &_depth_image.image,
+                 &_depth_image.allocation, nullptr);
+
+  VkImageViewCreateInfo image_view_info =
+      vk_struct_init::get_image_view_create_info(
+          _depth_image.image, VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT);
+
+  VK_CHECK(
+      vkCreateImageView(_device, &image_view_info, nullptr, &_depth_image_view),
+      "Failed to create depth image view");
+
+  _deallocator.push([=] {
+    vmaDestroyImage(_allocator, _depth_image.image, _depth_image.allocation);
+    vkDestroyImageView(_device, _depth_image_view, nullptr);
+  });
   return true;
 }
 
@@ -143,31 +171,79 @@ bool Renderer::init_renderpass() {
       VK_ATTACHMENT_STORE_OP_STORE; // Keep after renderpass
   color_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
   color_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-
   color_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
   // must only be used for presenting a presentable image for display.
   color_attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
-  // Attachment storage options
+  VkAttachmentDescription depth_attachment = {};
+  depth_attachment.format = _depth_image.format;
+  depth_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+  depth_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+  depth_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+  depth_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+  depth_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+  depth_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  depth_attachment.finalLayout =
+      VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+  VkAttachmentDescription attachments[2] = {color_attachment, depth_attachment};
+
+  // Attachments
   VkAttachmentReference color_attachment_ref = {};
   color_attachment_ref.attachment = 0; // attachment index
   color_attachment_ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
+  VkAttachmentReference depth_attachment_ref = {};
+  depth_attachment_ref.attachment = 1; // attachment index
+  depth_attachment_ref.layout =
+      VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+  VkAttachmentReference attachment_refs[2] = {color_attachment_ref,
+                                              depth_attachment_ref};
+
+  VkSubpassDependency dependencies[2] = {};
+  //  Color dependency
+  dependencies[0].srcSubpass =
+      VK_SUBPASS_EXTERNAL; // I'm not depending on a particular subpass but my
+                           // previous self
+  dependencies[0].dstSubpass = 0; // My subpass
+  // I'm waiting on the color attachment stage in both source and destination
+  dependencies[0].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+  dependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+  // Source is not specified so I'm waiting for the source to finish the color
+  // attachment before I can write to the color attachment
+  dependencies[0].srcAccessMask = 0; //
+  dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+  // Depth dependency
+  dependencies[1].srcSubpass = VK_SUBPASS_EXTERNAL;
+  dependencies[1].dstSubpass = 0;
+  // I'm waiting for the depth tests from the previous subpass
+  dependencies[1].srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                                 VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+  dependencies[1].dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                                 VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+  // Can't start writing to depth attachment until previous subpass is done
+  dependencies[1].srcAccessMask = 0;
+  dependencies[1].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
   // Define a subpass
   VkSubpassDescription subpass = {};
   subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-  subpass.colorAttachmentCount = 1; // 1 color attachment in this subpass
+  subpass.colorAttachmentCount = 1;
   subpass.pColorAttachments = &color_attachment_ref;
+  subpass.pDepthStencilAttachment = &depth_attachment_ref;
 
   // Define a renderpass
   VkRenderPassCreateInfo render_pass_info = {};
   render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
   render_pass_info.pNext = nullptr;
-
-  render_pass_info.attachmentCount = 1; // 1 color attachment
-  render_pass_info.pAttachments = &color_attachment;
-  render_pass_info.subpassCount = 1; // 1 subpass
+  render_pass_info.attachmentCount = 2;
+  render_pass_info.pAttachments = attachments;
+  render_pass_info.subpassCount = 1;
   render_pass_info.pSubpasses = &subpass;
+  render_pass_info.dependencyCount = 2;
+  render_pass_info.pDependencies = dependencies;
 
   VK_CHECK(
       vkCreateRenderPass(_device, &render_pass_info, nullptr, &_render_pass),
@@ -181,9 +257,8 @@ bool Renderer::init_framebuffers() {
   VkFramebufferCreateInfo fb_info = {};
   fb_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
   fb_info.pNext = nullptr;
-
+  fb_info.attachmentCount = 2;
   fb_info.renderPass = _render_pass;
-  fb_info.attachmentCount = 1;
   fb_info.width = _window_dims.width;
   fb_info.height = _window_dims.height;
   fb_info.layers = 1;
@@ -194,7 +269,12 @@ bool Renderer::init_framebuffers() {
 
   // create framebuffers for each of the swapchain image views
   for (int i = 0; i < swapchain_imagecount; i++) {
-    fb_info.pAttachments = &_swapchain_image_views[i];
+    VkImageView attachments[2];
+    attachments[0] = _swapchain_image_views[i];
+    attachments[1] = _depth_image_view;
+
+    fb_info.pAttachments = attachments;
+
     VK_CHECK(vkCreateFramebuffer(_device, &fb_info, nullptr, &_framebuffers[i]),
              "Failed to create framebuffer");
   }
@@ -286,25 +366,27 @@ bool Renderer::load_mesh(std::shared_ptr<Mesh> p_mesh,
   vmaalloc_info.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
 
   // Fill allocation buffer of the mesh object
-  VK_CHECK(vmaCreateBuffer(_vb_allocator, &buffer_info, &vmaalloc_info,
+  VK_CHECK(vmaCreateBuffer(_allocator, &buffer_info, &vmaalloc_info,
                            &p_mesh->_vertex_buffer._buffer,
                            &p_mesh->_vertex_buffer._allocation, nullptr),
            "Failed to create vertex buffer");
 
   // Destroy allocated buffer
   _deallocator.push([=]() {
-    vmaDestroyBuffer(_vb_allocator, p_mesh->_vertex_buffer._buffer,
+    vmaDestroyBuffer(_allocator, p_mesh->_vertex_buffer._buffer,
                      p_mesh->_vertex_buffer._allocation);
   });
 
   void *data;
-  vmaMapMemory(_vb_allocator, p_mesh->_vertex_buffer._allocation, &data);
+  vmaMapMemory(_allocator, p_mesh->_vertex_buffer._allocation, &data);
   memcpy(data, p_mesh->_vertices.data(),
          p_mesh->_vertices.size() * sizeof(Mesh::VertexInfo));
-  vmaUnmapMemory(_vb_allocator, p_mesh->_vertex_buffer._allocation);
+  vmaUnmapMemory(_allocator, p_mesh->_vertex_buffer._allocation);
 
-  add_pipeline(p_mesh->_shader, p_mesh->_vertex_info_description,
-               p_mesh->_push_constant_range);
+  if (_pipelines.size() == 1) { // Limiting pipeline creation to 2
+    add_pipeline(p_mesh->_shader, p_mesh->_vertex_info_description,
+                 p_mesh->_push_constant_range);
+  }
 
   _meshes.push_back(p_mesh);
   _objects.push_back(p_object);
@@ -335,9 +417,6 @@ bool Renderer::begin_render_pass() {
   VK_CHECK(vkBeginCommandBuffer(_cmd_buffer, &cmd_buffer_info),
            "Failed to begin command buffer");
 
-  VkClearValue clear_value;
-  clear_value.color = {{0.5f, 0.5f, 0.5, 1.0f}};
-
   VkRenderPassBeginInfo rp_info = {};
   rp_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
   rp_info.pNext = nullptr;
@@ -348,8 +427,14 @@ bool Renderer::begin_render_pass() {
   rp_info.renderArea.extent = _window_dims;
   rp_info.framebuffer = _framebuffers[_swapchain_img_idx];
 
-  rp_info.clearValueCount = 1;
-  rp_info.pClearValues = &clear_value;
+  VkClearValue clear_value;
+  VkClearValue depth_clear;
+  clear_value.color = {{0.5f, 0.5f, 0.5, 1.0f}};
+  depth_clear.depthStencil.depth = 1.f;
+
+  VkClearValue clear_values[2] = {clear_value, depth_clear};
+  rp_info.clearValueCount = 2;
+  rp_info.pClearValues = clear_values;
 
   vkCmdBeginRenderPass(_cmd_buffer, &rp_info, VK_SUBPASS_CONTENTS_INLINE);
   return true;
@@ -424,10 +509,9 @@ bool Renderer::draw() {
   memcpy(constants.view, view.data(), sizeof(float) * 16);
   memcpy(constants.projection, projection.data(), sizeof(float) * 16);
 
+  vkCmdBindPipeline(_cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    _pipelines[1]);
   for (int m_idx = 0; m_idx < _meshes.size(); m_idx++) {
-    vkCmdBindPipeline(_cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                      _pipelines[m_idx + 1]);
-
     VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(_cmd_buffer, 0, 1,
                            &_meshes[m_idx]->_vertex_buffer._buffer, &offset);
@@ -436,7 +520,7 @@ bool Renderer::draw() {
 
     memcpy(constants.model, model.data(), sizeof(float) * 16);
 
-    vkCmdPushConstants(_cmd_buffer, _pipeline_layouts[m_idx + 1],
+    vkCmdPushConstants(_cmd_buffer, _pipeline_layouts[1],
                        VK_SHADER_STAGE_VERTEX_BIT, 0,
                        sizeof(Mesh::ShaderConstants), &constants);
 

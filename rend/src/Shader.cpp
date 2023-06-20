@@ -7,7 +7,7 @@ Shader::get_shader_stage_info(VkShaderStageFlagBits stage,
   info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
   info.pNext = nullptr;
 
-  // shader stage
+  // Vert Frag Geom etc
   info.stage = stage;
   // module containing the code for this shader stage
   info.module = shaderModule;

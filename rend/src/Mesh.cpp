@@ -21,27 +21,32 @@ bool Mesh::load(Path path, Path vert_shader, Path frag_shader) {
   }
 
   Assimp::Importer importer;
-  scene = importer.ReadFile(path.native(), 0);
+  scene = importer.ReadFile(path.native(), aiProcess_Triangulate);
 
   uint32_t mNumMeshes = scene->mNumMeshes;
 
   // If the import failed, report it
   if (scene || mNumMeshes == 0) {
     mesh = scene->mMeshes[0];
-    for (int v = 0; v < mesh->mNumVertices; v++) {
-      VertexInfo vertex;
-      vertex.position[0] = mesh->mVertices[v].x;
-      vertex.position[1] = mesh->mVertices[v].y;
-      vertex.position[2] = mesh->mVertices[v].z;
+    _vertices.resize(mesh->mNumFaces * 3);
 
-      vertex.normal[0] = mesh->mNormals[v].x;
-      vertex.normal[1] = mesh->mNormals[v].y;
-      vertex.normal[2] = mesh->mNormals[v].z;
+    for (int f = 0; f < mesh->mNumFaces; f++) {
+      for (int v = 0; v < 3; v++) {
+        int v_idx = mesh->mFaces[f].mIndices[v];
+        VertexInfo vertex;
+        vertex.position[0] = mesh->mVertices[v_idx].x;
+        vertex.position[1] = mesh->mVertices[v_idx].y;
+        vertex.position[2] = mesh->mVertices[v_idx].z;
 
-      vertex.uv[0] = mesh->mTextureCoords[0][v].x;
-      vertex.uv[1] = mesh->mTextureCoords[0][v].y;
+        vertex.normal[0] = mesh->mNormals[v_idx].x;
+        vertex.normal[1] = mesh->mNormals[v_idx].y;
+        vertex.normal[2] = mesh->mNormals[v_idx].z;
 
-      _vertices.push_back(vertex);
+        vertex.uv[0] = mesh->mTextureCoords[0][v_idx].x;
+        vertex.uv[1] = mesh->mTextureCoords[0][v_idx].y;
+
+        _vertices.push_back(vertex);
+      }
     }
     return true;
   }

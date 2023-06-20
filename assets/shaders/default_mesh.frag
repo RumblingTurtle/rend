@@ -6,5 +6,5 @@ layout(location = 0) out vec4 outFragColor;
 
 void main() {
   float color = clamp(vNormal.z, 0.0f, 1.0f);
-  outFragColor = vec4(vNormal.z, vNormal.z, vNormal.z, 1.0f);
+  outFragColor = vec4(0, color, 0, 1);
 }

@@ -27,12 +27,16 @@ public:
     static VertexInfoDescription get_vertex_info_description();
   };
 
+  struct {
+    VkBuffer _buffer;
+    VmaAllocation _allocation;
+  } _vertex_buffer;
+
   Path _mesh_path;
   Shader _shader;
   std::vector<VertexInfo> _vertices;
 
   VertexInfoDescription _vertex_info_description;
-  AllocatedBuffer _vertex_buffer;
   VkPushConstantRange _push_constant_range;
 
   Mesh();
