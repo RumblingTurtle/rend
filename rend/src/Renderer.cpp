@@ -12,7 +12,6 @@ bool Renderer::init() {
   _window = SDL_CreateWindow("rend", SDL_WINDOWPOS_CENTERED,
                              SDL_WINDOWPOS_CENTERED, _window_dims.width,
                              _window_dims.height, SDL_WINDOW_VULKAN);
-
   _deallocator.push([=]() { SDL_DestroyWindow(_window); });
 
   if (_window == nullptr) {
@@ -22,7 +21,8 @@ bool Renderer::init() {
 
   _initialized = init_vulkan() && init_swapchain() && init_z_buffer() &&
                  init_cmd_buffer() && init_renderpass() &&
-                 init_framebuffers() && init_sync_primitives();
+                 init_framebuffers() && init_sync_primitives() &&
+                 init_descriptor_pool();
   return _initialized;
 }
 
@@ -100,29 +100,21 @@ bool Renderer::init_swapchain() {
 
 bool Renderer::init_z_buffer() {
   VkImageCreateInfo image_info = vk_struct_init::get_image_create_info(
-      _depth_image.format, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+      VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
       VkExtent3D{_window_dims.width, _window_dims.height, 1});
-
-  VmaAllocationCreateInfo alloc_info = {};
-  alloc_info.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-  alloc_info.requiredFlags =
-      VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-  vmaCreateImage(_allocator, &image_info, &alloc_info, &_depth_image.image,
-                 &_depth_image.allocation, nullptr);
 
   VkImageViewCreateInfo image_view_info =
       vk_struct_init::get_image_view_create_info(
-          _depth_image.image, VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT);
+          nullptr, VK_FORMAT_D32_SFLOAT,
+          VK_IMAGE_ASPECT_DEPTH_BIT); // Image arg will be substituted from
+                                      // image_infos image field
 
-  VK_CHECK(
-      vkCreateImageView(_device, &image_view_info, nullptr, &_depth_image_view),
-      "Failed to create depth image view");
+  VmaAllocationCreateInfo alloc_info = vk_struct_init::get_allocation_info();
 
-  _deallocator.push([=] {
-    vmaDestroyImage(_allocator, _depth_image.image, _depth_image.allocation);
-    vkDestroyImageView(_device, _depth_image_view, nullptr);
-  });
+  _depth_image = ImageAllocation::create(image_info, image_view_info,
+                                         alloc_info, _device, _allocator);
+
+  _deallocator.push([=] { _depth_image.destroy(); });
   return true;
 }
 
@@ -271,7 +263,7 @@ bool Renderer::init_framebuffers() {
   for (int i = 0; i < swapchain_imagecount; i++) {
     VkImageView attachments[2];
     attachments[0] = _swapchain_image_views[i];
-    attachments[1] = _depth_image_view;
+    attachments[1] = _depth_image.view;
 
     fb_info.pAttachments = attachments;
 
@@ -310,6 +302,39 @@ bool Renderer::init_sync_primitives() {
     vkDestroyFence(_device, _command_complete_fence, nullptr);
   });
 
+  return true;
+}
+
+bool Renderer::init_descriptor_pool() {
+  VkDescriptorPoolCreateInfo pool_info = {};
+
+  VkDescriptorPoolSize scene = {};
+  scene.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+  scene.descriptorCount = 5;
+
+  VkDescriptorPoolSize material = {};
+  material.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+  material.descriptorCount = 5;
+
+  VkDescriptorPoolSize model = {};
+  model.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+  model.descriptorCount = 5;
+
+  VkDescriptorPoolSize pool_sizes[3] = {scene, material, model};
+
+  pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  pool_info.pNext = nullptr;
+  pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+  pool_info.maxSets = 10;
+  pool_info.poolSizeCount = 3;
+  pool_info.pPoolSizes = pool_sizes;
+  if (vkCreateDescriptorPool(_device, &pool_info, nullptr, &_descriptor_pool) !=
+      VK_SUCCESS) {
+    return false;
+  }
+
+  _deallocator.push(
+      [=] { vkDestroyDescriptorPool(_device, _descriptor_pool, nullptr); });
   return true;
 }
 
@@ -422,8 +447,8 @@ bool Renderer::end_render_pass() {
 
 bool Renderer::check_materials() {
   for (auto &pair : _renderables) {
-    pair.first->build_pipeline(_device, _render_pass, _window_dims,
-                               _deallocator);
+    pair.first->build_pipeline(_device, _render_pass, _allocator, _window_dims,
+                               _descriptor_pool, _deallocator);
   }
   return true;
 }
@@ -436,28 +461,44 @@ bool Renderer::draw() {
   Eigen::Matrix4f projection = camera->get_projection_matrix();
   Eigen::Matrix4f view = camera->get_view_matrix();
 
-  Material::PushConstants constants;
-  memcpy(constants.view, view.data(), sizeof(float) * view.size());
-  memcpy(constants.projection, projection.data(),
-         sizeof(float) * projection.size());
-
+  Material *prev_material = nullptr;
   for (auto &pair : _renderables) {
     Material *material = pair.first;
-    vkCmdBindPipeline(_cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                      material->pipeline);
+    if (prev_material != material) {
+      void *data;
+      vmaMapMemory(_allocator, material->_camera_buffer.allocation, &data);
+      memcpy(data, view.data(), sizeof(float) * view.size());
+      memcpy(data + sizeof(float) * view.size(), projection.data(),
+             sizeof(float) * projection.size());
+      vmaUnmapMemory(_allocator, material->_camera_buffer.allocation);
+
+      vkCmdBindPipeline(_cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                        material->pipeline);
+      vkCmdBindDescriptorSets(_cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                              material->pipeline_layout, 0,
+                              material->ds_allocator.descriptor_sets.size(),
+                              material->ds_allocator.descriptor_sets.data(), 0,
+                              nullptr);
+      prev_material = material;
+    }
 
     for (Renderable::Ptr p_renderable : pair.second) {
       VkDeviceSize offset = 0;
       vkCmdBindVertexBuffers(_cmd_buffer, 0, 1,
-                             &p_renderable->p_mesh->allocation_buffer.buffer,
+                             &p_renderable->p_mesh->buffer_allocation.buffer,
                              &offset);
 
       Eigen::Matrix4f model = p_renderable->object.get_model_matrix();
+      void *data;
+      vmaMapMemory(_allocator, material->_model_buffer.allocation, &data);
+      memcpy(data, model.data(), sizeof(float) * model.size());
+      vmaUnmapMemory(_allocator, material->_model_buffer.allocation);
+
+      Material::PushConstants constants;
       memcpy(constants.model, model.data(), sizeof(float) * model.size());
       vkCmdPushConstants(_cmd_buffer, material->pipeline_layout,
-                         VK_SHADER_STAGE_VERTEX_BIT, 0,
-                         sizeof(Material::PushConstants), &constants);
-
+                         VK_SHADER_STAGE_VERTEX_BIT, 0, 16 * sizeof(float),
+                         &constants);
       vkCmdDraw(_cmd_buffer, p_renderable->p_mesh->vertex_count(), 1, 0, 0);
     }
   }

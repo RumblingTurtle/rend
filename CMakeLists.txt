@@ -63,12 +63,13 @@ message(STATUS "Sources:\n ${${CMAKE_PROJECT_NAME}_SOURCES}")
 
 # LIB
 set(${CMAKE_PROJECT_NAME}_SOURCES
+    rend/src/vma_impl.cpp  
     rend/src/Renderer.cpp
     rend/src/InputHandler.cpp
     rend/src/Shader.cpp
     rend/src/Mesh.cpp    
     rend/src/Material.cpp  
-    rend/src/vma_impl.cpp  
+    rend/src/Texture.cpp
 )
 
 add_library(${CMAKE_PROJECT_NAME} 
@@ -82,6 +83,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PUBLIC
     VulkanMemoryAllocator/include
     rend/include/
     vk-bootstrap/src
+    stb/
 )
 
 target_link_libraries(${CMAKE_PROJECT_NAME}  PUBLIC

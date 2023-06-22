@@ -11,6 +11,7 @@
 #include <macros.h>
 #include <map>
 #include <memory>
+#include <types.h>
 #include <vector>
 #include <vk_struct_init.h>
 #include <vulkan/vulkan.h>
@@ -23,31 +24,25 @@ class Renderer {
   VkInstance _instance;
   VkPhysicalDevice _physical_device;
   VkDevice _device;
-  VkDebugUtilsMessengerEXT _debug_messenger;
   VkSurfaceKHR _surface;
+  VkQueue _graphics_queue;
+  uint32_t _queue_family;
+
+  VkDebugUtilsMessengerEXT _debug_messenger;
 
   // Swapchain
   VkSwapchainKHR _swapchain;
   VkFormat _swapchain_image_format;
-
-  // Swapchain images
   std::vector<VkImage> _swapchain_images;
   std::vector<VkImageView> _swapchain_image_views;
   uint32_t _swapchain_img_idx; // Current swapchain image index
 
   // Depth buffer
-  VkImageView _depth_image_view;
-  struct {
-    VkImage image;
-    VmaAllocation allocation;
-    VkFormat format = VK_FORMAT_D32_SFLOAT;
-  } _depth_image;
+  ImageAllocation _depth_image;
 
   // CMD buffer
   VkCommandPool _cmd_pool;
   VkCommandBuffer _cmd_buffer;
-  VkQueue _graphics_queue;
-  uint32_t _queue_family;
 
   // Renderpass
   VkRenderPass _render_pass;
@@ -68,6 +63,8 @@ class Renderer {
 
   int _frame_number = 0;
   bool _initialized = false;
+
+  VkDescriptorPool _descriptor_pool;
 
 public:
   std::unique_ptr<Camera> camera;
@@ -102,11 +99,14 @@ public:
   // Initializes semaphores and fences for syncronization with the gpu
   bool init_sync_primitives();
 
+  bool init_descriptor_pool();
+
   // Registers renderable object to the render queue
   bool load_renderable(Renderable::Ptr renderable);
 
   // Checks if all submited materials are built
   bool check_materials();
+
   bool begin_render_pass();
 
   bool end_render_pass();

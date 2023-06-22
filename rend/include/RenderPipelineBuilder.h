@@ -1,4 +1,5 @@
 #pragma once
+#include <DescriptorSet.h>
 #include <Shader.h>
 #include <iostream>
 #include <macros.h>
@@ -23,8 +24,9 @@ class RenderPipelineBuilder {
 public:
   void build_pipeline_layout(VkDevice &_device,
                              VkPushConstantRange &push_constant_range,
+                             DescriptorSetAllocator &ds_allocator,
                              VkPipelineLayout &layout_out) {
-    pipeline_layout_info = get_pipeline_layout_create_info();
+    pipeline_layout_info = get_pipeline_layout_create_info(ds_allocator);
     if (push_constant_range.size != 0) {
       pipeline_layout_info.pPushConstantRanges = &push_constant_range;
       pipeline_layout_info.pushConstantRangeCount = 1;
@@ -41,6 +43,7 @@ public:
                       VkPipelineLayout &_pipeline_layout,
                       VertexInfoDescription &vertex_info_description,
                       VkPipeline &newPipeline) {
+
     _depth_stencil_create_info = vk_struct_init::get_depth_stencil_create_info(
         true, true, VK_COMPARE_OP_LESS_OR_EQUAL);
     set_vertex_input_state_create_info(vertex_info_description);
@@ -118,15 +121,16 @@ public:
   }
 
   // Shader inputs for a pipeline
-  VkPipelineLayoutCreateInfo get_pipeline_layout_create_info() {
+  VkPipelineLayoutCreateInfo
+  get_pipeline_layout_create_info(DescriptorSetAllocator &ds_allocator) {
     VkPipelineLayoutCreateInfo info{};
     info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     info.pNext = nullptr;
 
     // empty defaults
     info.flags = 0;
-    info.setLayoutCount = 0;
-    info.pSetLayouts = nullptr;
+    info.setLayoutCount = ds_allocator.layouts.size();
+    info.pSetLayouts = ds_allocator.layouts.data();
     info.pushConstantRangeCount = 0;
     info.pPushConstantRanges = nullptr;
     return info;

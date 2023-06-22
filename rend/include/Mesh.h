@@ -20,10 +20,7 @@ class Mesh {
 public:
   typedef std::shared_ptr<Mesh> Ptr;
 
-  struct {
-    VkBuffer buffer;
-    VmaAllocation allocation;
-  } allocation_buffer;
+  BufferAllocation buffer_allocation;
 
   Path _mesh_path;
 

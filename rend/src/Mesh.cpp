@@ -42,31 +42,17 @@ bool Mesh::generate_allocation_buffer(VmaAllocator &allocator,
   if (_buffer_generated) {
     return true;
   }
-  VkBufferCreateInfo buffer_info = {};
-  buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-  buffer_info.size = _vertices.size() * sizeof(float);
-  buffer_info.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-
-  // Writing buffer from CPU to GPU
-  VmaAllocationCreateInfo vmaalloc_info = {};
-  vmaalloc_info.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
-
-  // Fill allocation buffer of the mesh object
-  VK_CHECK(vmaCreateBuffer(allocator, &buffer_info, &vmaalloc_info,
-                           &allocation_buffer.buffer,
-                           &allocation_buffer.allocation, nullptr),
-           "Failed to create vertex buffer");
+  buffer_allocation = BufferAllocation::create(
+      _vertices.size() * sizeof(float), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+      VMA_MEMORY_USAGE_CPU_TO_GPU, allocator);
 
   // Destroy allocated buffer
-  deallocator_queue.push([=]() {
-    vmaDestroyBuffer(allocator, allocation_buffer.buffer,
-                     allocation_buffer.allocation);
-  });
+  deallocator_queue.push([=]() { buffer_allocation.destroy(); });
 
   void *data;
-  vmaMapMemory(allocator, allocation_buffer.allocation, &data);
+  vmaMapMemory(allocator, buffer_allocation.allocation, &data);
   memcpy(data, _vertices.data(), _vertices.size() * sizeof(float));
-  vmaUnmapMemory(allocator, allocation_buffer.allocation);
+  vmaUnmapMemory(allocator, buffer_allocation.allocation);
   _buffer_generated = true;
   return true;
 }

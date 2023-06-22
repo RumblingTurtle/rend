@@ -1,8 +1,15 @@
 #include <Material.h>
 
-Material::Material(Path vert_shader, Path frag_shader) {
+Material::Material(Path vert_shader, Path frag_shader, Path texture_path) {
   if (vert_shader.native().size() != 0 && frag_shader.native().size() != 0) {
     shader = Shader(vert_shader, frag_shader);
+  }
+
+  if (texture_path.native().size() != 0) {
+    _texture_loaded = texture.load(texture_path);
+  } else {
+    _texture_loaded = texture.load(
+        Path(ASSET_DIRECTORY + std::string{"/textures/error.jpg"}));
   }
 
   vertex_info_description = VertexShaderInput::get_vertex_info_description();
@@ -14,17 +21,61 @@ Material::Material(Path vert_shader, Path frag_shader) {
 }
 
 bool Material::build_pipeline(VkDevice &device, VkRenderPass &render_pass,
-                              VkExtent2D &window_dims,
+                              VmaAllocator &allocator, VkExtent2D &window_dims,
+                              VkDescriptorPool &descriptor_pool,
                               Deallocator &deallocation_queue) {
   if (_pipeline_built) {
     return true;
   }
+
+  if (_texture_loaded) {
+    texture.allocate_image(device, allocator, deallocation_queue);
+  }
+
   if (!shader.build_shader_modules(device)) {
     return false;
   }
 
+  {
+    // Build sampler
+    VkSamplerCreateInfo sampler_info =
+        vk_struct_init::get_sampler_create_info(filter, address_mode);
+    VK_CHECK(vkCreateSampler(device, &sampler_info, nullptr, &sampler),
+             "Failed to create sampler");
+    // Bindings for the descriptor set
+    std::vector<std::vector<Binding>> bindings = {
+        {{ds_availability, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+          sizeof(CameraInfo)}}, // Camera info (view, projection)
+        {{ds_availability, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+          texture.get_pixels_size()}}, // Texture
+        {{ds_availability, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+          sizeof(ModelInfo)}}}; // Model info
+
+    ds_allocator.assemble_layouts(bindings, device);
+    ds_allocator.allocate_descriptor_sets(descriptor_pool);
+
+    // Allocate buffers for the camera and model info and texture
+    _camera_buffer = BufferAllocation::create(
+        sizeof(CameraInfo), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+        VMA_MEMORY_USAGE_CPU_TO_GPU, allocator);
+    _model_buffer = BufferAllocation::create(
+        sizeof(ModelInfo), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+        VMA_MEMORY_USAGE_CPU_TO_GPU, allocator);
+
+    ds_allocator.bind_buffer(0, 0, _camera_buffer);
+    ds_allocator.bind_image(1, 0, texture.image_allocation,
+                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, sampler);
+    ds_allocator.bind_buffer(2, 0, _model_buffer);
+    deallocation_queue.push([=] {
+      vkDestroySampler(device, sampler, nullptr);
+      _camera_buffer.destroy();
+      _model_buffer.destroy();
+      ds_allocator.destroy(descriptor_pool);
+    });
+  }
+
   _pipeline_builder.build_pipeline_layout(device, push_constants_description,
-                                          pipeline_layout);
+                                          ds_allocator, pipeline_layout);
   _pipeline_builder.build_pipeline(device, render_pass, window_dims, shader,
                                    pipeline_layout, vertex_info_description,
                                    pipeline);

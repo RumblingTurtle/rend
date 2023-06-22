@@ -21,7 +21,7 @@ inline VkImageCreateInfo get_image_create_info(VkFormat format,
 }
 
 inline VkImageViewCreateInfo
-get_image_view_create_info(VkImage &image, VkFormat format,
+get_image_view_create_info(VkImage image, VkFormat format,
                            VkImageAspectFlags aspectFlags) {
   VkImageViewCreateInfo view_info = {};
   view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -37,6 +37,16 @@ get_image_view_create_info(VkImage &image, VkFormat format,
   view_info.subresourceRange.baseArrayLayer = 0;
   view_info.subresourceRange.layerCount = 1;
   return view_info;
+}
+
+inline VmaAllocationCreateInfo
+get_allocation_info(VmaMemoryUsage usage = VMA_MEMORY_USAGE_GPU_ONLY,
+                    VmaAllocationCreateFlags flags = VkMemoryPropertyFlags(
+                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) {
+  VmaAllocationCreateInfo alloc_info = {};
+  alloc_info.usage = usage;
+  alloc_info.flags = flags;
+  return alloc_info;
 }
 
 inline VkPipelineDepthStencilStateCreateInfo
@@ -55,6 +65,39 @@ get_depth_stencil_create_info(bool do_depth_test, bool write_depth,
   info.minDepthBounds = 0.0f;
   info.maxDepthBounds = 1.0f;
   info.stencilTestEnable = VK_FALSE;
+
+  return info;
+}
+
+inline VkWriteDescriptorSet get_descriptor_write_info(
+    size_t binding, VkDescriptorSet ds, VkDescriptorType type,
+    VkDescriptorBufferInfo *buffer_info, VkDescriptorImageInfo *image_info) {
+  VkWriteDescriptorSet write = {};
+  write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  write.pNext = nullptr;
+
+  write.dstBinding = binding;
+  write.dstSet = ds;
+  write.descriptorCount = 1;
+  write.descriptorType = type;
+  write.pBufferInfo = buffer_info;
+  write.pImageInfo = image_info;
+
+  return write;
+}
+
+inline VkSamplerCreateInfo
+get_sampler_create_info(VkFilter filters, VkSamplerAddressMode addr_mode) {
+  VkSamplerCreateInfo info = {};
+  info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+  info.pNext = nullptr;
+
+  info.addressModeU = addr_mode;
+  info.addressModeV = addr_mode;
+  info.addressModeW = addr_mode;
+
+  info.magFilter = filters;
+  info.minFilter = filters;
 
   return info;
 }
