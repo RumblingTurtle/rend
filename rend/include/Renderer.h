@@ -66,6 +66,12 @@ class Renderer {
 
   VkDescriptorPool _descriptor_pool;
 
+  struct {
+    VkCommandPool pool;
+    VkCommandBuffer buffer;
+    VkFence fence;
+  } _submit_buffer;
+
 public:
   std::unique_ptr<Camera> camera;
 
@@ -103,6 +109,12 @@ public:
 
   // Registers renderable object to the render queue
   bool load_renderable(Renderable::Ptr renderable);
+
+  // Starts submission command buffer recording
+  bool begin_one_time_submit();
+
+  // Submits a command to _submit_buffer buffer
+  bool end_one_time_submit();
 
   // Checks if all submited materials are built
   bool check_materials();

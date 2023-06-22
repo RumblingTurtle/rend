@@ -130,6 +130,10 @@ bool Renderer::init_cmd_buffer() {
   VK_CHECK(vkCreateCommandPool(_device, &cmd_pool_info, nullptr, &_cmd_pool),
            "Failed to create command pool");
 
+  VK_CHECK(vkCreateCommandPool(_device, &cmd_pool_info, nullptr,
+                               &_submit_buffer.pool),
+           "Failed to create command pool");
+
   VkCommandBufferAllocateInfo cmd_buffer_info = {};
   cmd_buffer_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
   cmd_buffer_info.pNext = nullptr;
@@ -140,9 +144,14 @@ bool Renderer::init_cmd_buffer() {
   VK_CHECK(vkAllocateCommandBuffers(_device, &cmd_buffer_info, &_cmd_buffer),
            "Failed to allocate command buffer");
 
-  _deallocator.push([=] {
-    vkDestroyCommandPool(_device, _cmd_pool, nullptr);
+  cmd_buffer_info.commandPool = _submit_buffer.pool;
+  VK_CHECK(vkAllocateCommandBuffers(_device, &cmd_buffer_info,
+                                    &_submit_buffer.buffer),
+           "Failed to allocate submit buffer");
 
+  _deallocator.push([=] {
+    vkDestroyCommandPool(_device, _submit_buffer.pool, nullptr);
+    vkDestroyCommandPool(_device, _cmd_pool, nullptr);
     vkDestroyRenderPass(_device, _render_pass, nullptr);
     // destroy swapchain resources
     for (int i = 0; i < _swapchain_image_views.size(); i++) {
@@ -296,10 +305,15 @@ bool Renderer::init_sync_primitives() {
       vkCreateFence(_device, &fence_info, nullptr, &_command_complete_fence),
       "Failed to create render fence");
 
+  VK_CHECK(vkCreateFence(_device, &fence_info, nullptr, &_submit_buffer.fence),
+           "Failed to create submit fence");
+  vkResetFences(_device, 1, &_submit_buffer.fence);
+
   _deallocator.push([=] {
     vkDestroySemaphore(_device, _swapchain_semaphore, nullptr);
     vkDestroySemaphore(_device, _render_complete_semaphore, nullptr);
     vkDestroyFence(_device, _command_complete_fence, nullptr);
+    vkDestroyFence(_device, _submit_buffer.fence, nullptr);
   });
 
   return true;
@@ -313,7 +327,7 @@ bool Renderer::init_descriptor_pool() {
   scene.descriptorCount = 5;
 
   VkDescriptorPoolSize material = {};
-  material.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+  material.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
   material.descriptorCount = 5;
 
   VkDescriptorPoolSize model = {};
@@ -344,6 +358,44 @@ bool Renderer::load_renderable(Renderable::Ptr renderable) {
   }
   renderable->p_mesh->generate_allocation_buffer(_allocator, _deallocator);
   _renderables[renderable->p_material.get()].push_back(renderable);
+  return true;
+}
+
+bool Renderer::begin_one_time_submit() {
+  VK_CHECK(vkResetCommandBuffer(_submit_buffer.buffer, 0),
+           "Failed to reset command buffer");
+  VkCommandBufferBeginInfo cmd_buffer_info = {};
+  cmd_buffer_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  cmd_buffer_info.pNext = nullptr;
+  cmd_buffer_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  // Fill command buffer
+
+  VK_CHECK(vkBeginCommandBuffer(_submit_buffer.buffer, &cmd_buffer_info),
+           "Failed to begin command buffer");
+  return true;
+}
+
+bool Renderer::end_one_time_submit() {
+  VK_CHECK(vkEndCommandBuffer(_submit_buffer.buffer),
+           "Failed to end command buffer");
+
+  VkSubmitInfo submit = {};
+  submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submit.pNext = nullptr;
+
+  submit.waitSemaphoreCount = 0;
+  submit.pWaitSemaphores = nullptr;
+  submit.pWaitDstStageMask = nullptr;
+  submit.commandBufferCount = 1;
+  submit.pCommandBuffers = &_submit_buffer.buffer;
+  submit.signalSemaphoreCount = 0;
+  submit.pSignalSemaphores = nullptr;
+
+  VK_CHECK(vkQueueSubmit(_graphics_queue, 1, &submit, _submit_buffer.fence),
+           "Failed to submit to queue");
+  vkWaitForFences(_device, 1, &_submit_buffer.fence, true, 9999999999);
+  vkResetFences(_device, 1, &_submit_buffer.fence);
+  vkResetCommandPool(_device, _submit_buffer.pool, 0);
   return true;
 }
 
@@ -402,6 +454,13 @@ bool Renderer::end_render_pass() {
   VkSubmitInfo submit = {};
   submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submit.pNext = nullptr;
+  submit.waitSemaphoreCount = 0;
+  submit.pWaitSemaphores = nullptr;
+  submit.pWaitDstStageMask = nullptr;
+  submit.commandBufferCount = 1;
+  submit.pCommandBuffers = &_cmd_buffer;
+  submit.signalSemaphoreCount = 0;
+  submit.pSignalSemaphores = nullptr;
 
   VkPipelineStageFlags wait_stage =
       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -447,8 +506,89 @@ bool Renderer::end_render_pass() {
 
 bool Renderer::check_materials() {
   for (auto &pair : _renderables) {
+    if (pair.first->pipeline_built()) {
+      continue;
+    }
+
+    if (!pair.first->allocate_texture(_device, _allocator, _deallocator)) {
+      throw std::runtime_error("Failed to allocate texture");
+    }
+    pair.first->init_descriptor_sets(_device, _allocator, _descriptor_pool,
+                                     _deallocator);
+    pair.first->bind_buffers_and_images();
     pair.first->build_pipeline(_device, _render_pass, _allocator, _window_dims,
-                               _descriptor_pool, _deallocator);
+                               _deallocator);
+
+    // Create a cpu side buffer for the texture
+    BufferAllocation staging_buffer = BufferAllocation::create(
+        pair.first->texture.get_pixels_size(), VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VMA_MEMORY_USAGE_CPU_TO_GPU, _allocator);
+
+    void *data;
+    vmaMapMemory(_allocator, staging_buffer.allocation, &data);
+    memcpy(data, pair.first->texture.get_pixels(),
+           pair.first->texture.get_pixels_size());
+    vmaUnmapMemory(_allocator, staging_buffer.allocation);
+
+    // Change the layout of the texture to be linear as the staging buffer
+    VkImageSubresourceRange range;
+    range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    range.baseMipLevel = 0;
+    range.levelCount = 1;
+    range.baseArrayLayer = 0;
+    range.layerCount = 1;
+
+    begin_one_time_submit();
+    VkImageMemoryBarrier barrier_info = {};
+    barrier_info.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier_info.image = pair.first->texture.image_allocation.image;
+    barrier_info.subresourceRange = range;
+
+    barrier_info.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier_info.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+
+    barrier_info.srcAccessMask = 0;
+    barrier_info.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+    vkCmdPipelineBarrier(_submit_buffer.buffer,
+                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                         nullptr, 1, &barrier_info);
+    // Copy the staging buffer to the image
+    VkBufferImageCopy copyRegion = {};
+    copyRegion.bufferOffset = 0;
+    copyRegion.bufferRowLength = 0;
+    copyRegion.bufferImageHeight = 0;
+
+    copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copyRegion.imageSubresource.mipLevel = 0;
+    copyRegion.imageSubresource.baseArrayLayer = 0;
+    copyRegion.imageSubresource.layerCount = 1;
+    copyRegion.imageExtent =
+        VkExtent3D{static_cast<uint32_t>(pair.first->texture.width),
+                   static_cast<uint32_t>(pair.first->texture.height), 1};
+
+    vkCmdCopyBufferToImage(_submit_buffer.buffer, staging_buffer.buffer,
+                           pair.first->texture.image_allocation.image,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+                           &copyRegion);
+
+    VkImageMemoryBarrier barrier_info2 = {};
+    barrier_info2.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier_info2.image = pair.first->texture.image_allocation.image;
+    barrier_info2.subresourceRange = range;
+
+    barrier_info2.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier_info2.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier_info2.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier_info2.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(_submit_buffer.buffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr,
+                         0, nullptr, 1, &barrier_info2);
+    end_one_time_submit();
+
+    staging_buffer.destroy(); // We don't need the staging buffer anymore
   }
   return true;
 }
@@ -479,7 +619,6 @@ bool Renderer::draw() {
                               material->ds_allocator.descriptor_sets.size(),
                               material->ds_allocator.descriptor_sets.data(), 0,
                               nullptr);
-      prev_material = material;
     }
 
     for (Renderable::Ptr p_renderable : pair.second) {
@@ -489,10 +628,6 @@ bool Renderer::draw() {
                              &offset);
 
       Eigen::Matrix4f model = p_renderable->object.get_model_matrix();
-      void *data;
-      vmaMapMemory(_allocator, material->_model_buffer.allocation, &data);
-      memcpy(data, model.data(), sizeof(float) * model.size());
-      vmaUnmapMemory(_allocator, material->_model_buffer.allocation);
 
       Material::PushConstants constants;
       memcpy(constants.model, model.data(), sizeof(float) * model.size());

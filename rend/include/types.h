@@ -26,6 +26,7 @@ struct BufferAllocation {
     buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     buffer_info.size = size;
     buffer_info.usage = buffer_usage;
+    buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VmaAllocationCreateInfo vmaalloc_info = {};
     vmaalloc_info.usage = alloc_usage;
@@ -66,12 +67,17 @@ struct ImageAllocation {
     VkResult image_result = vmaCreateImage(
         allocator, &image_create_info, &allocation_info,
         &image_allocation.image, &image_allocation.allocation, nullptr);
-
+    if (image_result != VK_SUCCESS) {
+      std::cerr << "ImageAllocation: Failed to create image" << std::endl;
+      return {};
+    }
     image_view_create_info.image = image_allocation.image;
     VkResult image_view_result = vkCreateImageView(
         device, &image_view_create_info, nullptr, &image_allocation.view);
 
-    if (image_result != VK_SUCCESS || image_view_result != VK_SUCCESS) {
+    if (image_view_result != VK_SUCCESS) {
+
+      std::cerr << "ImageAllocation: Failed to create image view" << std::endl;
       return {};
     }
     return image_allocation;

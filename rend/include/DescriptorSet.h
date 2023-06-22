@@ -64,8 +64,6 @@ struct DescriptorSetAllocator {
   VkDevice device;
 
 public:
-  std::vector<std::vector<BufferAllocation>>
-      allocations; // Allocation per each binding
   std::vector<VkDescriptorSetLayout> layouts;
   std::vector<VkDescriptorSet> descriptor_sets;
 
@@ -95,6 +93,10 @@ public:
   }
 
   void bind_buffer(int set_idx, int binding_idx, BufferAllocation &allocation) {
+    if (set_idx >= assemblers.size() ||
+        binding_idx >= assemblers[set_idx].bindings.size()) {
+      throw std::runtime_error("Binding index out of range");
+    }
     VkDescriptorBufferInfo buffer_info = {};
     buffer_info.buffer = allocation.buffer;
     buffer_info.offset = 0;
@@ -116,6 +118,10 @@ public:
 
   void bind_image(int set_idx, int binding_idx, ImageAllocation &allocation,
                   VkImageLayout layout, VkSampler &sampler) {
+    if (set_idx >= assemblers.size() ||
+        binding_idx >= assemblers[set_idx].bindings.size()) {
+      throw std::runtime_error("Binding index out of range");
+    }
     VkDescriptorImageInfo image_info = {};
     image_info.imageLayout = layout;
     image_info.imageView = allocation.view;

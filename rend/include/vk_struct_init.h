@@ -16,6 +16,7 @@ inline VkImageCreateInfo get_image_create_info(VkFormat format,
   image_info.arrayLayers = 1;
   image_info.samples = VK_SAMPLE_COUNT_1_BIT;
   image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+  image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
   image_info.usage = flags;
   return image_info;
 }

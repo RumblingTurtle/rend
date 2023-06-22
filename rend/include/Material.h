@@ -37,8 +37,6 @@ public:
   struct PushConstants {
     float model[16];
   };
-  VkShaderStageFlags ds_availability =
-      VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT;
 
   struct CameraInfo {
     float view[16];
@@ -49,9 +47,9 @@ public:
   struct ModelInfo {
     float model[16];
   };
-  BufferAllocation _model_buffer;
 
   ImageAllocation _texture_image;
+  BufferAllocation _model_buffer;
 
   DescriptorSetAllocator ds_allocator;
 
@@ -62,9 +60,17 @@ public:
     return ds_allocator.layouts;
   }
 
+  bool allocate_texture(VkDevice &device, VmaAllocator &allocator,
+                        Deallocator &deallocation_queue);
+
+  bool init_descriptor_sets(VkDevice &device, VmaAllocator &allocator,
+                            VkDescriptorPool &descriptor_pool,
+                            Deallocator &deallocation_queue);
+
+  bool bind_buffers_and_images();
+
   bool build_pipeline(VkDevice &device, VkRenderPass &render_pass,
                       VmaAllocator &allocator, VkExtent2D &window_dims,
-                      VkDescriptorPool &descriptor_pool,
                       Deallocator &deallocation_queue);
 
   bool pipeline_built();

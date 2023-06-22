@@ -20,22 +20,17 @@ Material::Material(Path vert_shader, Path frag_shader, Path texture_path) {
   push_constants_description.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 }
 
-bool Material::build_pipeline(VkDevice &device, VkRenderPass &render_pass,
-                              VmaAllocator &allocator, VkExtent2D &window_dims,
-                              VkDescriptorPool &descriptor_pool,
-                              Deallocator &deallocation_queue) {
-  if (_pipeline_built) {
-    return true;
-  }
-
+bool Material::allocate_texture(VkDevice &device, VmaAllocator &allocator,
+                                Deallocator &deallocation_queue) {
   if (_texture_loaded) {
-    texture.allocate_image(device, allocator, deallocation_queue);
+    return texture.allocate_image(device, allocator, deallocation_queue);
   }
+  return false;
+}
 
-  if (!shader.build_shader_modules(device)) {
-    return false;
-  }
-
+bool Material::init_descriptor_sets(VkDevice &device, VmaAllocator &allocator,
+                                    VkDescriptorPool &descriptor_pool,
+                                    Deallocator &deallocation_queue) {
   {
     // Build sampler
     VkSamplerCreateInfo sampler_info =
@@ -44,12 +39,11 @@ bool Material::build_pipeline(VkDevice &device, VkRenderPass &render_pass,
              "Failed to create sampler");
     // Bindings for the descriptor set
     std::vector<std::vector<Binding>> bindings = {
-        {{ds_availability, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        {{VK_SHADER_STAGE_VERTEX_BIT, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           sizeof(CameraInfo)}}, // Camera info (view, projection)
-        {{ds_availability, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-          texture.get_pixels_size()}}, // Texture
-        {{ds_availability, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          sizeof(ModelInfo)}}}; // Model info
+        {{VK_SHADER_STAGE_FRAGMENT_BIT,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          texture.get_pixels_size()}}};
 
     ds_allocator.assemble_layouts(bindings, device);
     ds_allocator.allocate_descriptor_sets(descriptor_pool);
@@ -62,16 +56,32 @@ bool Material::build_pipeline(VkDevice &device, VkRenderPass &render_pass,
         sizeof(ModelInfo), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
         VMA_MEMORY_USAGE_CPU_TO_GPU, allocator);
 
-    ds_allocator.bind_buffer(0, 0, _camera_buffer);
-    ds_allocator.bind_image(1, 0, texture.image_allocation,
-                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, sampler);
-    ds_allocator.bind_buffer(2, 0, _model_buffer);
     deallocation_queue.push([=] {
       vkDestroySampler(device, sampler, nullptr);
       _camera_buffer.destroy();
       _model_buffer.destroy();
       ds_allocator.destroy(descriptor_pool);
     });
+  }
+  return true;
+}
+
+bool Material::bind_buffers_and_images() {
+  ds_allocator.bind_buffer(0, 0, _camera_buffer);
+  ds_allocator.bind_image(1, 0, texture.image_allocation,
+                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, sampler);
+  return true;
+}
+
+bool Material::build_pipeline(VkDevice &device, VkRenderPass &render_pass,
+                              VmaAllocator &allocator, VkExtent2D &window_dims,
+                              Deallocator &deallocation_queue) {
+  if (_pipeline_built) {
+    return true;
+  }
+
+  if (!shader.build_shader_modules(device)) {
+    return false;
   }
 
   _pipeline_builder.build_pipeline_layout(device, push_constants_description,

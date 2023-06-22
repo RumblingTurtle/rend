@@ -25,7 +25,7 @@ bool Mesh::load(Path path) {
         _vertices[f * 24 + v * 8 + 4] = mesh->mNormals[v_idx].y;
         _vertices[f * 24 + v * 8 + 5] = mesh->mNormals[v_idx].z;
         _vertices[f * 24 + v * 8 + 6] = mesh->mTextureCoords[0][v_idx].x;
-        _vertices[f * 24 + v * 8 + 7] = mesh->mTextureCoords[0][v_idx].y;
+        _vertices[f * 24 + v * 8 + 7] = 1 - mesh->mTextureCoords[0][v_idx].y;
       }
     }
     return true;
