@@ -10,6 +10,7 @@ struct Binding {
   VkShaderStageFlags stage;
   VkDescriptorType type;
   size_t size;
+  size_t descriptor_count;
 };
 
 struct DescriptorSetAssembler {
@@ -33,7 +34,8 @@ struct DescriptorSetAssembler {
       VkDescriptorSetLayoutBinding descriptor_set_layout_binding = {};
       descriptor_set_layout_binding.binding = b_idx;
       descriptor_set_layout_binding.descriptorCount =
-          1; // number of elements in a single binding
+          bindings[b_idx]
+              .descriptor_count; // number of elements in a single binding
       descriptor_set_layout_binding.descriptorType = bindings[b_idx].type;
       descriptor_set_layout_binding.stageFlags = bindings[b_idx].stage;
       descriptor_set_layout_binding.pImmutableSamplers = nullptr;
@@ -97,10 +99,18 @@ public:
         binding_idx >= assemblers[set_idx].bindings.size()) {
       throw std::runtime_error("Binding index out of range");
     }
-    VkDescriptorBufferInfo buffer_info = {};
-    buffer_info.buffer = allocation.buffer;
-    buffer_info.offset = 0;
-    buffer_info.range = allocation.size;
+
+    int descriptor_count =
+        assemblers[set_idx].bindings[binding_idx].descriptor_count;
+    int descriptor_size = assemblers[set_idx].bindings[binding_idx].size;
+    std::vector<VkDescriptorBufferInfo> buffer_infos;
+    for (int d = 0; d < descriptor_count; d++) {
+      VkDescriptorBufferInfo buffer_info = {};
+      buffer_info.buffer = allocation.buffer;
+      buffer_info.offset = d * descriptor_size;
+      buffer_info.range = descriptor_size;
+      buffer_infos.push_back(buffer_info);
+    }
 
     if (assemblers[set_idx].bindings[binding_idx].type !=
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER &&
@@ -111,7 +121,8 @@ public:
 
     VkWriteDescriptorSet write = vk_struct_init::get_descriptor_write_info(
         binding_idx, descriptor_sets[set_idx],
-        assemblers[set_idx].bindings[binding_idx].type, &buffer_info, nullptr);
+        assemblers[set_idx].bindings[binding_idx].type, descriptor_count,
+        buffer_infos.data(), nullptr);
 
     vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
   }
@@ -122,6 +133,7 @@ public:
         binding_idx >= assemblers[set_idx].bindings.size()) {
       throw std::runtime_error("Binding index out of range");
     }
+
     VkDescriptorImageInfo image_info = {};
     image_info.imageLayout = layout;
     image_info.imageView = allocation.view;
@@ -136,20 +148,17 @@ public:
 
     VkWriteDescriptorSet write = vk_struct_init::get_descriptor_write_info(
         binding_idx, descriptor_sets[set_idx],
-        assemblers[set_idx].bindings[binding_idx].type, nullptr, &image_info);
+        assemblers[set_idx].bindings[binding_idx].type, 1, nullptr,
+        &image_info);
 
     vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
-  }
-
-  void destroy_layouts() {
-    for (auto &assembler : assemblers) {
-      assembler.destroy();
-    }
   }
 
   void destroy(VkDescriptorPool descriptor_pool) {
     vkFreeDescriptorSets(device, descriptor_pool, descriptor_sets.size(),
                          descriptor_sets.data());
-    destroy_layouts();
+    for (auto &assembler : assemblers) {
+      assembler.destroy();
+    }
   }
 };

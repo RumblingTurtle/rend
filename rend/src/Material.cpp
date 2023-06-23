@@ -20,15 +20,15 @@ Material::Material(Path vert_shader, Path frag_shader, Path texture_path) {
   push_constants_description.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 }
 
-bool Material::allocate_texture(VkDevice &device, VmaAllocator &allocator,
+bool Material::allocate_texture(VkDevice &device,
                                 Deallocator &deallocation_queue) {
   if (_texture_loaded) {
-    return texture.allocate_image(device, allocator, deallocation_queue);
+    return texture.allocate_image(device, _allocator, deallocation_queue);
   }
   return false;
 }
 
-bool Material::init_descriptor_sets(VkDevice &device, VmaAllocator &allocator,
+bool Material::init_descriptor_sets(VkDevice &device,
                                     VkDescriptorPool &descriptor_pool,
                                     Deallocator &deallocation_queue) {
   {
@@ -39,25 +39,33 @@ bool Material::init_descriptor_sets(VkDevice &device, VmaAllocator &allocator,
              "Failed to create sampler");
     // Bindings for the descriptor set
     std::vector<std::vector<Binding>> bindings = {
-        {{VK_SHADER_STAGE_VERTEX_BIT, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          sizeof(CameraInfo)}}, // Camera info (view, projection)
+        {{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, sizeof(CameraInfo), 1},
+         {VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+          sizeof(LightSource), MAX_LIGHTS}}, // Camera info (view, projection)
         {{VK_SHADER_STAGE_FRAGMENT_BIT,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          texture.get_pixels_size()}}};
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, texture.get_pixels_size(),
+          1}}};
 
     ds_allocator.assemble_layouts(bindings, device);
     ds_allocator.allocate_descriptor_sets(descriptor_pool);
 
     // Allocate buffers for the camera and model info and texture
+    // This can be generalized to any number of buffers and descriptor sets but
+    // will do for now
     _camera_buffer = BufferAllocation::create(
         sizeof(CameraInfo), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-        VMA_MEMORY_USAGE_CPU_TO_GPU, allocator);
+        VMA_MEMORY_USAGE_CPU_TO_GPU, _allocator);
     _model_buffer = BufferAllocation::create(
         sizeof(ModelInfo), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-        VMA_MEMORY_USAGE_CPU_TO_GPU, allocator);
+        VMA_MEMORY_USAGE_CPU_TO_GPU, _allocator);
+    _light_buffer = BufferAllocation::create(
+        sizeof(LightSource) * MAX_LIGHTS, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+        VMA_MEMORY_USAGE_CPU_TO_GPU, _allocator);
 
     deallocation_queue.push([=] {
       vkDestroySampler(device, sampler, nullptr);
+      _light_buffer.destroy();
       _camera_buffer.destroy();
       _model_buffer.destroy();
       ds_allocator.destroy(descriptor_pool);
@@ -68,13 +76,23 @@ bool Material::init_descriptor_sets(VkDevice &device, VmaAllocator &allocator,
 
 bool Material::bind_buffers_and_images() {
   ds_allocator.bind_buffer(0, 0, _camera_buffer);
+  ds_allocator.bind_buffer(0, 1, _light_buffer);
   ds_allocator.bind_image(1, 0, texture.image_allocation,
                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, sampler);
   return true;
 }
 
+bool Material::update_lights(std::vector<LightSource> &lights) {
+  if (lights.size() > MAX_LIGHTS) {
+    std::cerr << "Light count exceeds maximum allowed lights" << std::endl;
+    return false;
+  }
+  _light_buffer.copy_from(lights.data(), sizeof(LightSource) * lights.size());
+  return true;
+}
+
 bool Material::build_pipeline(VkDevice &device, VkRenderPass &render_pass,
-                              VmaAllocator &allocator, VkExtent2D &window_dims,
+                              VkExtent2D &window_dims,
                               Deallocator &deallocation_queue) {
   if (_pipeline_built) {
     return true;

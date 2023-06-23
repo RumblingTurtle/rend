@@ -70,20 +70,21 @@ get_depth_stencil_create_info(bool do_depth_test, bool write_depth,
   return info;
 }
 
-inline VkWriteDescriptorSet get_descriptor_write_info(
-    size_t binding, VkDescriptorSet ds, VkDescriptorType type,
-    VkDescriptorBufferInfo *buffer_info, VkDescriptorImageInfo *image_info) {
+inline VkWriteDescriptorSet
+get_descriptor_write_info(size_t binding, VkDescriptorSet ds,
+                          VkDescriptorType type, size_t descriptor_count,
+                          VkDescriptorBufferInfo *buffer_info,
+                          VkDescriptorImageInfo *image_info) {
   VkWriteDescriptorSet write = {};
   write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
   write.pNext = nullptr;
 
   write.dstBinding = binding;
   write.dstSet = ds;
-  write.descriptorCount = 1;
+  write.descriptorCount = descriptor_count;
   write.descriptorType = type;
   write.pBufferInfo = buffer_info;
   write.pImageInfo = image_info;
-
   return write;
 }
 

@@ -1,4 +1,5 @@
 #pragma once
+#include <cstring>
 #include <deque>
 #include <filesystem>
 #include <functional>
@@ -12,7 +13,7 @@ struct BufferAllocation {
   VkBuffer buffer = VK_NULL_HANDLE;
   VmaAllocation allocation = VK_NULL_HANDLE;
   size_t size;
-  VmaAllocator allocator;
+  VmaAllocator allocator = VK_NULL_HANDLE;
 
   static BufferAllocation create(size_t size, VkBufferUsageFlags buffer_usage,
                                  VmaMemoryUsage alloc_usage,
@@ -38,6 +39,28 @@ struct BufferAllocation {
     }
 
     return buffer_allocation;
+  }
+
+  // Single copy
+  bool copy_from(void *data, size_t size) {
+    void *mapped_data;
+    vmaMapMemory(allocator, allocation, &mapped_data);
+    memcpy(mapped_data, data, size);
+    vmaUnmapMemory(allocator, allocation);
+    return true;
+  }
+
+  // Multiple copies with different sizes
+  bool copy_from(void *datas[], size_t sizes[], size_t num_datas) {
+    void *mapped_data;
+    vmaMapMemory(allocator, allocation, &mapped_data);
+    int offset = 0;
+    for (int i = 0; i < num_datas; i++) {
+      memcpy(mapped_data + offset, datas[i], sizes[i]);
+      offset += sizes[i];
+    }
+    vmaUnmapMemory(allocator, allocation);
+    return true;
   }
 
   bool valid() { return buffer != VK_NULL_HANDLE; }

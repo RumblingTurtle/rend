@@ -18,6 +18,7 @@
 #include <Object.h>
 #include <RenderPipelineBuilder.h>
 #include <Renderable.h>
+#include <constants.h>
 #include <macros.h>
 #include <types.h>
 
@@ -75,12 +76,16 @@ class Renderer {
     VkFence fence;
   } _submit_buffer;
 
+  VkDeviceSize min_ubo_alignment;
+
 public:
   std::unique_ptr<Camera> camera;
+  std::vector<LightSource> lights;
 
   Renderer() {
     camera = std::make_unique<Camera>(
         90.f, _window_dims.width / _window_dims.height, 0.1f, 200.0f);
+    lights.resize(MAX_LIGHTS);
   };
 
   ~Renderer();

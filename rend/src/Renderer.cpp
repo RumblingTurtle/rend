@@ -59,6 +59,9 @@ bool Renderer::init_vulkan() {
   _graphics_queue = vkb_device.get_queue(vkb::QueueType::graphics).value();
   _queue_family = vkb_device.get_queue_index(vkb::QueueType::graphics).value();
 
+  min_ubo_alignment = vkb_device.physical_device.properties.limits
+                          .minUniformBufferOffsetAlignment;
+
   // Setup vertex buffer allocator
   VmaAllocatorCreateInfo allocatorInfo = {};
   allocatorInfo.physicalDevice = _physical_device;
@@ -324,15 +327,15 @@ bool Renderer::init_descriptor_pool() {
 
   VkDescriptorPoolSize scene = {};
   scene.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-  scene.descriptorCount = 5;
+  scene.descriptorCount = 10;
 
   VkDescriptorPoolSize material = {};
   material.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-  material.descriptorCount = 5;
+  material.descriptorCount = 10;
 
   VkDescriptorPoolSize model = {};
   model.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-  model.descriptorCount = 5;
+  model.descriptorCount = 10;
 
   VkDescriptorPoolSize pool_sizes[3] = {scene, material, model};
 
@@ -434,7 +437,7 @@ bool Renderer::begin_render_pass() {
 
   VkClearValue clear_value;
   VkClearValue depth_clear;
-  clear_value.color = {{0.5f, 0.5f, 0.5, 1.0f}};
+  clear_value.color = {{0.2f, 0.2f, 0.2, 1.0f}};
   depth_clear.depthStencil.depth = 1.f;
 
   VkClearValue clear_values[2] = {clear_value, depth_clear};
@@ -506,89 +509,89 @@ bool Renderer::end_render_pass() {
 
 bool Renderer::check_materials() {
   for (auto &pair : _renderables) {
-    if (pair.first->pipeline_built()) {
-      continue;
+
+    if (!pair.first->pipeline_built()) {
+      pair.first->bind_allocator(_allocator);
+
+      if (!pair.first->allocate_texture(_device, _deallocator)) {
+        throw std::runtime_error("Failed to allocate texture");
+      }
+
+      pair.first->init_descriptor_sets(_device, _descriptor_pool, _deallocator);
+      pair.first->bind_buffers_and_images();
+      pair.first->build_pipeline(_device, _render_pass, _window_dims,
+                                 _deallocator);
+
+      // Create a cpu side buffer for the texture
+      BufferAllocation staging_buffer =
+          BufferAllocation::create(pair.first->texture.get_pixels_size(),
+                                   VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                   VMA_MEMORY_USAGE_CPU_TO_GPU, _allocator);
+
+      staging_buffer.copy_from((void *)pair.first->texture.get_pixels(),
+                               pair.first->texture.get_pixels_size());
+
+      // Change the layout of the texture to be linear as the staging buffer
+      VkImageSubresourceRange range;
+      range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      range.baseMipLevel = 0;
+      range.levelCount = 1;
+      range.baseArrayLayer = 0;
+      range.layerCount = 1;
+
+      begin_one_time_submit();
+      VkImageMemoryBarrier barrier_info = {};
+      barrier_info.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+      barrier_info.image = pair.first->texture.image_allocation.image;
+      barrier_info.subresourceRange = range;
+
+      barrier_info.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+      barrier_info.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+
+      barrier_info.srcAccessMask = 0;
+      barrier_info.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+      vkCmdPipelineBarrier(_submit_buffer.buffer,
+                           VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                           VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                           nullptr, 1, &barrier_info);
+      // Copy the staging buffer to the image
+      VkBufferImageCopy copyRegion = {};
+      copyRegion.bufferOffset = 0;
+      copyRegion.bufferRowLength = 0;
+      copyRegion.bufferImageHeight = 0;
+
+      copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      copyRegion.imageSubresource.mipLevel = 0;
+      copyRegion.imageSubresource.baseArrayLayer = 0;
+      copyRegion.imageSubresource.layerCount = 1;
+      copyRegion.imageExtent =
+          VkExtent3D{static_cast<uint32_t>(pair.first->texture.width),
+                     static_cast<uint32_t>(pair.first->texture.height), 1};
+
+      vkCmdCopyBufferToImage(_submit_buffer.buffer, staging_buffer.buffer,
+                             pair.first->texture.image_allocation.image,
+                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+                             &copyRegion);
+
+      VkImageMemoryBarrier barrier_info2 = {};
+      barrier_info2.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+      barrier_info2.image = pair.first->texture.image_allocation.image;
+      barrier_info2.subresourceRange = range;
+
+      barrier_info2.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+      barrier_info2.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+      barrier_info2.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+      barrier_info2.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+      vkCmdPipelineBarrier(_submit_buffer.buffer,
+                           VK_PIPELINE_STAGE_TRANSFER_BIT,
+                           VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr,
+                           0, nullptr, 1, &barrier_info2);
+      end_one_time_submit();
+
+      staging_buffer.destroy(); // We don't need the staging buffer anymore
     }
-
-    if (!pair.first->allocate_texture(_device, _allocator, _deallocator)) {
-      throw std::runtime_error("Failed to allocate texture");
-    }
-    pair.first->init_descriptor_sets(_device, _allocator, _descriptor_pool,
-                                     _deallocator);
-    pair.first->bind_buffers_and_images();
-    pair.first->build_pipeline(_device, _render_pass, _allocator, _window_dims,
-                               _deallocator);
-
-    // Create a cpu side buffer for the texture
-    BufferAllocation staging_buffer = BufferAllocation::create(
-        pair.first->texture.get_pixels_size(), VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VMA_MEMORY_USAGE_CPU_TO_GPU, _allocator);
-
-    void *data;
-    vmaMapMemory(_allocator, staging_buffer.allocation, &data);
-    memcpy(data, pair.first->texture.get_pixels(),
-           pair.first->texture.get_pixels_size());
-    vmaUnmapMemory(_allocator, staging_buffer.allocation);
-
-    // Change the layout of the texture to be linear as the staging buffer
-    VkImageSubresourceRange range;
-    range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    range.baseMipLevel = 0;
-    range.levelCount = 1;
-    range.baseArrayLayer = 0;
-    range.layerCount = 1;
-
-    begin_one_time_submit();
-    VkImageMemoryBarrier barrier_info = {};
-    barrier_info.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier_info.image = pair.first->texture.image_allocation.image;
-    barrier_info.subresourceRange = range;
-
-    barrier_info.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    barrier_info.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-
-    barrier_info.srcAccessMask = 0;
-    barrier_info.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-
-    vkCmdPipelineBarrier(_submit_buffer.buffer,
-                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
-                         nullptr, 1, &barrier_info);
-    // Copy the staging buffer to the image
-    VkBufferImageCopy copyRegion = {};
-    copyRegion.bufferOffset = 0;
-    copyRegion.bufferRowLength = 0;
-    copyRegion.bufferImageHeight = 0;
-
-    copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    copyRegion.imageSubresource.mipLevel = 0;
-    copyRegion.imageSubresource.baseArrayLayer = 0;
-    copyRegion.imageSubresource.layerCount = 1;
-    copyRegion.imageExtent =
-        VkExtent3D{static_cast<uint32_t>(pair.first->texture.width),
-                   static_cast<uint32_t>(pair.first->texture.height), 1};
-
-    vkCmdCopyBufferToImage(_submit_buffer.buffer, staging_buffer.buffer,
-                           pair.first->texture.image_allocation.image,
-                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
-                           &copyRegion);
-
-    VkImageMemoryBarrier barrier_info2 = {};
-    barrier_info2.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier_info2.image = pair.first->texture.image_allocation.image;
-    barrier_info2.subresourceRange = range;
-
-    barrier_info2.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    barrier_info2.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    barrier_info2.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    barrier_info2.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-    vkCmdPipelineBarrier(_submit_buffer.buffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr,
-                         0, nullptr, 1, &barrier_info2);
-    end_one_time_submit();
-
-    staging_buffer.destroy(); // We don't need the staging buffer anymore
   }
   return true;
 }
@@ -605,13 +608,6 @@ bool Renderer::draw() {
   for (auto &pair : _renderables) {
     Material *material = pair.first;
     if (prev_material != material) {
-      void *data;
-      vmaMapMemory(_allocator, material->_camera_buffer.allocation, &data);
-      memcpy(data, view.data(), sizeof(float) * view.size());
-      memcpy(data + sizeof(float) * view.size(), projection.data(),
-             sizeof(float) * projection.size());
-      vmaUnmapMemory(_allocator, material->_camera_buffer.allocation);
-
       vkCmdBindPipeline(_cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                         material->pipeline);
       vkCmdBindDescriptorSets(_cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -619,6 +615,13 @@ bool Renderer::draw() {
                               material->ds_allocator.descriptor_sets.size(),
                               material->ds_allocator.descriptor_sets.data(), 0,
                               nullptr);
+      void *datas[3] = {view.data(), projection.data(),
+                        camera->position.data()};
+      size_t sizes[3] = {sizeof(float) * view.size(),
+                         sizeof(float) * projection.size(), sizeof(float) * 3};
+
+      material->_camera_buffer.copy_from(datas, sizes, 3);
+      material->update_lights(lights);
     }
 
     for (Renderable::Ptr p_renderable : pair.second) {

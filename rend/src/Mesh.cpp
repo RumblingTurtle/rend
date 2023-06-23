@@ -49,10 +49,8 @@ bool Mesh::generate_allocation_buffer(VmaAllocator &allocator,
   // Destroy allocated buffer
   deallocator_queue.push([=]() { buffer_allocation.destroy(); });
 
-  void *data;
-  vmaMapMemory(allocator, buffer_allocation.allocation, &data);
-  memcpy(data, _vertices.data(), _vertices.size() * sizeof(float));
-  vmaUnmapMemory(allocator, buffer_allocation.allocation);
+  buffer_allocation.copy_from(_vertices.data(),
+                              _vertices.size() * sizeof(float));
   _buffer_generated = true;
   return true;
 }
