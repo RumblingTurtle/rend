@@ -10,6 +10,7 @@ find_package(Vulkan REQUIRED)
 find_package(assimp REQUIRED)
 find_package(Eigen3 REQUIRED)
 
+find_package(SDL2 REQUIRED)
 add_subdirectory(vk-bootstrap)
 add_subdirectory(VulkanMemoryAllocator)
 
@@ -92,6 +93,8 @@ target_link_libraries(${CMAKE_PROJECT_NAME}  PUBLIC
     vk-bootstrap::vk-bootstrap
     VulkanMemoryAllocator
     assimp
+    SDL2
+    SDL2_mixer
 )
 
 add_dependencies(${CMAKE_PROJECT_NAME} ${SHADER_TARGETS})

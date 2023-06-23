@@ -1,6 +1,6 @@
 #pragma once
-#include <Shader.h>
 #include <macros.h>
+#include <memory>
 #include <types.h>
 
 #include <Eigen/Dense>
@@ -8,9 +8,9 @@
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
 
-#include <memory>
 #include <vk_mem_alloc.h>
 
+#include <Shader.h>
 class Mesh {
   // Contiguous chunk of vertices which is passed to the shader as is
   std::vector<float> _vertices;

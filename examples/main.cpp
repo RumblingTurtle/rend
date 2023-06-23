@@ -1,18 +1,24 @@
-#include <InputHandler.h>
+#include <Renderer.h>
+
 #include <Material.h>
 #include <Mesh.h>
 #include <Object.h>
-#include <Renderer.h>
-#include <chrono>
+#include <Renderable.h>
+
+#include <AudioPlayer.h>
+#include <InputHandler.h>
+
+#include <TimeUtils.h>
 
 int main() {
   Renderer renderer{};
+  AudioPlayer audio_player{};
+  audio_player.load(Path{ASSET_DIRECTORY} / Path{"audio/dingus.mp3"});
+  audio_player.loop = true;
 
   if (!renderer.init()) {
     return 1;
   }
-  std::chrono::high_resolution_clock::time_point t1 =
-      std::chrono::high_resolution_clock::now();
 
   InputHandler input_handler;
   std::shared_ptr<Mesh> mesh = std::make_shared<Mesh>();
@@ -37,12 +43,13 @@ int main() {
   renderer.load_renderable(renderable1);
   renderer.load_renderable(renderable2);
 
+  audio_player.play();
+
+  Time::TimePoint t1 = Time::now();
   while (input_handler.poll() && renderer.draw()) {
-    std::chrono::high_resolution_clock::time_point t2 =
-        std::chrono::high_resolution_clock::now();
-    float time =
-        std::chrono::duration_cast<std::chrono::duration<float>>(t2 - t1)
-            .count();
+    Time::TimePoint t2 = Time::now();
+    float time = Time::time_difference<Time::Seconds>(t2, t1);
+
     renderable1->object.position =
         Eigen::Vector3f{20 * std::cos(time), 0.5f + std::cos(time), 0.0f};
     renderable1->object.rotation = Eigen::Quaternionf{

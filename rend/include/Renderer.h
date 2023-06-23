@@ -1,22 +1,25 @@
 #pragma once
+
+#include <exception>
+#include <iostream>
+#include <map>
+#include <memory>
+#include <vector>
+
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_vulkan.h>
+
+#include <VkBootstrap.h>
+#include <vk_mem_alloc.h>
+#include <vk_struct_init.h>
+#include <vulkan/vulkan.h>
+
 #include <Mesh.h>
 #include <Object.h>
 #include <RenderPipelineBuilder.h>
 #include <Renderable.h>
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_vulkan.h>
-#include <VkBootstrap.h>
-#include <exception>
-#include <iostream>
 #include <macros.h>
-#include <map>
-#include <memory>
 #include <types.h>
-#include <vector>
-#include <vk_struct_init.h>
-#include <vulkan/vulkan.h>
-
-#include <vk_mem_alloc.h>
 
 class Renderer {
   VkExtent2D _window_dims{1000, 1000};
