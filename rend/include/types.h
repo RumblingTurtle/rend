@@ -56,7 +56,7 @@ struct BufferAllocation {
     vmaMapMemory(allocator, allocation, &mapped_data);
     int offset = 0;
     for (int i = 0; i < num_datas; i++) {
-      memcpy(mapped_data + offset, datas[i], sizes[i]);
+      memcpy(mapped_data + offset, datas[i], sizes[i]); // It's fine:)
       offset += sizes[i];
     }
     vmaUnmapMemory(allocator, allocation);

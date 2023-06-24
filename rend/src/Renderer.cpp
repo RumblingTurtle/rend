@@ -83,9 +83,7 @@ bool Renderer::init_vulkan() {
 bool Renderer::init_swapchain() {
   vkb::SwapchainBuilder chainBuilder{_physical_device, _device, _surface};
   vkb::Swapchain vkb_swapchain =
-      chainBuilder
-          .use_default_format_selection()
-          // use vsync present mode
+      chainBuilder.use_default_format_selection()
           .set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR)
           .set_desired_extent(_window_dims.width, _window_dims.height)
           .build()
@@ -112,7 +110,8 @@ bool Renderer::init_z_buffer() {
           VK_IMAGE_ASPECT_DEPTH_BIT); // Image arg will be substituted from
                                       // image_infos image field
 
-  VmaAllocationCreateInfo alloc_info = vk_struct_init::get_allocation_info();
+  VmaAllocationCreateInfo alloc_info = vk_struct_init::get_allocation_info(
+      VMA_MEMORY_USAGE_GPU_ONLY, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
   _depth_image = ImageAllocation::create(image_info, image_view_info,
                                          alloc_info, _device, _allocator);
@@ -122,33 +121,26 @@ bool Renderer::init_z_buffer() {
 }
 
 bool Renderer::init_cmd_buffer() {
-  VkCommandPoolCreateInfo cmd_pool_info = {};
-  cmd_pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-  cmd_pool_info.pNext = nullptr;
-
-  cmd_pool_info.queueFamilyIndex = _queue_family;
-  // allow  resetting of individual command buffers
-  cmd_pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+  VkCommandPoolCreateInfo cmd_pool_info =
+      vk_struct_init::get_command_pool_create_info(
+          _queue_family, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
 
   VK_CHECK(vkCreateCommandPool(_device, &cmd_pool_info, nullptr, &_cmd_pool),
            "Failed to create command pool");
-
   VK_CHECK(vkCreateCommandPool(_device, &cmd_pool_info, nullptr,
                                &_submit_buffer.pool),
            "Failed to create command pool");
 
-  VkCommandBufferAllocateInfo cmd_buffer_info = {};
-  cmd_buffer_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-  cmd_buffer_info.pNext = nullptr;
-  cmd_buffer_info.commandPool = _cmd_pool;
-  cmd_buffer_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-  cmd_buffer_info.commandBufferCount = 1;
+  VkCommandBufferAllocateInfo cmd_buffer_info =
+      vk_struct_init::get_command_buffer_allocate_info(
+          _cmd_pool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1);
+  VkCommandBufferAllocateInfo submit_buffer_info =
+      vk_struct_init::get_command_buffer_allocate_info(
+          _submit_buffer.pool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1);
 
   VK_CHECK(vkAllocateCommandBuffers(_device, &cmd_buffer_info, &_cmd_buffer),
            "Failed to allocate command buffer");
-
-  cmd_buffer_info.commandPool = _submit_buffer.pool;
-  VK_CHECK(vkAllocateCommandBuffers(_device, &cmd_buffer_info,
+  VK_CHECK(vkAllocateCommandBuffers(_device, &submit_buffer_info,
                                     &_submit_buffer.buffer),
            "Failed to allocate submit buffer");
 
@@ -167,87 +159,90 @@ bool Renderer::init_cmd_buffer() {
 }
 
 bool Renderer::init_renderpass() {
-  VkAttachmentDescription color_attachment = {};
-  color_attachment.format = _swapchain_image_format;
-  color_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
-  color_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR; // Clear on load
-  color_attachment.storeOp =
-      VK_ATTACHMENT_STORE_OP_STORE; // Keep after renderpass
-  color_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-  color_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-  color_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-  // must only be used for presenting a presentable image for display.
-  color_attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+  VkAttachmentDescription color_attachment =
+      vk_struct_init::get_attachment_description(
+          _swapchain_image_format,          //
+          VK_SAMPLE_COUNT_1_BIT,            //
+          VK_ATTACHMENT_LOAD_OP_CLEAR,      //
+          VK_ATTACHMENT_STORE_OP_STORE,     //
+          VK_ATTACHMENT_LOAD_OP_DONT_CARE,  //
+          VK_ATTACHMENT_STORE_OP_DONT_CARE, //
+          VK_IMAGE_LAYOUT_UNDEFINED,        //
+          VK_IMAGE_LAYOUT_PRESENT_SRC_KHR   //
+      );
 
-  VkAttachmentDescription depth_attachment = {};
-  depth_attachment.format = _depth_image.format;
-  depth_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
-  depth_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-  depth_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-  depth_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-  depth_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-  depth_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-  depth_attachment.finalLayout =
-      VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+  VkAttachmentDescription depth_attachment =
+      vk_struct_init::get_attachment_description(
+          _depth_image.format,                             //
+          VK_SAMPLE_COUNT_1_BIT,                           //
+          VK_ATTACHMENT_LOAD_OP_CLEAR,                     //
+          VK_ATTACHMENT_STORE_OP_STORE,                    //
+          VK_ATTACHMENT_LOAD_OP_LOAD,                      //
+          VK_ATTACHMENT_STORE_OP_DONT_CARE,                //
+          VK_IMAGE_LAYOUT_UNDEFINED,                       //
+          VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL //
+      );
 
   VkAttachmentDescription attachments[2] = {color_attachment, depth_attachment};
 
   // Attachments
-  VkAttachmentReference color_attachment_ref = {};
-  color_attachment_ref.attachment = 0; // attachment index
-  color_attachment_ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  VkAttachmentReference color_attachment_ref = {
+      0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+  VkAttachmentReference depth_attachment_ref = {
+      1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
 
-  VkAttachmentReference depth_attachment_ref = {};
-  depth_attachment_ref.attachment = 1; // attachment index
-  depth_attachment_ref.layout =
-      VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+  VkSubpassDependency color_dependency = vk_struct_init::get_subpass_dependency(
+      // - Wait for the previous subpass to finish
+      VK_SUBPASS_EXTERNAL, //
+      0,
+      // - I'm waiting on the
+      // color attachment stage
+      // in both source and
+      // destination
+      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
 
-  VkAttachmentReference attachment_refs[2] = {color_attachment_ref,
-                                              depth_attachment_ref};
+      // - Source is not specified
+      // so I'm waiting for the
+      // source to finish the
+      // color attachment before
+      // I can write to the color
+      // attachment
+      0,
+      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, //
+      0);
 
-  VkSubpassDependency dependencies[2] = {};
-  //  Color dependency
-  dependencies[0].srcSubpass =
-      VK_SUBPASS_EXTERNAL; // I'm not depending on a particular subpass but my
-                           // previous self
-  dependencies[0].dstSubpass = 0; // My subpass
-  // I'm waiting on the color attachment stage in both source and destination
-  dependencies[0].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-  dependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-  // Source is not specified so I'm waiting for the source to finish the color
-  // attachment before I can write to the color attachment
-  dependencies[0].srcAccessMask = 0; //
-  dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  VkSubpassDependency depth_dependency = vk_struct_init::get_subpass_dependency(
+      VK_SUBPASS_EXTERNAL, //
+      0,
+      // I'm waiting for the depth tests from the previous subpass
+      VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+          VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+      VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+          VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+      // Can't start writing to depth attachment until previous subpass is done
+      0,
+      VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, //
+      0);
 
-  // Depth dependency
-  dependencies[1].srcSubpass = VK_SUBPASS_EXTERNAL;
-  dependencies[1].dstSubpass = 0;
-  // I'm waiting for the depth tests from the previous subpass
-  dependencies[1].srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
-                                 VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-  dependencies[1].dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
-                                 VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-  // Can't start writing to depth attachment until previous subpass is done
-  dependencies[1].srcAccessMask = 0;
-  dependencies[1].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+  VkSubpassDependency subpass_dependencies[2] = {color_dependency,
+                                                 depth_dependency};
 
-  // Define a subpass
-  VkSubpassDescription subpass = {};
-  subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-  subpass.colorAttachmentCount = 1;
-  subpass.pColorAttachments = &color_attachment_ref;
-  subpass.pDepthStencilAttachment = &depth_attachment_ref;
+  VkSubpassDescription subpass = vk_struct_init::get_subpass_description(
+      0,                               //
+      VK_PIPELINE_BIND_POINT_GRAPHICS, //
+      0, nullptr,                      //
+      1, &color_attachment_ref,        //
+      nullptr,
+      &depth_attachment_ref, //
+      0, nullptr);
 
   // Define a renderpass
-  VkRenderPassCreateInfo render_pass_info = {};
-  render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-  render_pass_info.pNext = nullptr;
-  render_pass_info.attachmentCount = 2;
-  render_pass_info.pAttachments = attachments;
-  render_pass_info.subpassCount = 1;
-  render_pass_info.pSubpasses = &subpass;
-  render_pass_info.dependencyCount = 2;
-  render_pass_info.pDependencies = dependencies;
+  VkRenderPassCreateInfo render_pass_info =
+      vk_struct_init::get_create_render_pass_info(0,              //
+                                                  2, attachments, //
+                                                  1, &subpass,    //
+                                                  2, subpass_dependencies);
 
   VK_CHECK(
       vkCreateRenderPass(_device, &render_pass_info, nullptr, &_render_pass),
@@ -273,10 +268,7 @@ bool Renderer::init_framebuffers() {
 
   // create framebuffers for each of the swapchain image views
   for (int i = 0; i < swapchain_imagecount; i++) {
-    VkImageView attachments[2];
-    attachments[0] = _swapchain_image_views[i];
-    attachments[1] = _depth_image.view;
-
+    VkImageView attachments[2] = {_swapchain_image_views[i], _depth_image.view};
     fb_info.pAttachments = attachments;
 
     VK_CHECK(vkCreateFramebuffer(_device, &fb_info, nullptr, &_framebuffers[i]),
@@ -294,7 +286,7 @@ bool Renderer::init_sync_primitives() {
   VkFenceCreateInfo fence_info = {};
   fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
   fence_info.pNext = nullptr;
-  fence_info.flags = VK_FENCE_CREATE_SIGNALED_BIT; // Creates waitable fence
+  fence_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
   VK_CHECK(vkCreateSemaphore(_device, &semaphore_info, nullptr,
                              &_swapchain_semaphore),
@@ -310,7 +302,6 @@ bool Renderer::init_sync_primitives() {
 
   VK_CHECK(vkCreateFence(_device, &fence_info, nullptr, &_submit_buffer.fence),
            "Failed to create submit fence");
-  vkResetFences(_device, 1, &_submit_buffer.fence);
 
   _deallocator.push([=] {
     vkDestroySemaphore(_device, _swapchain_semaphore, nullptr);
@@ -371,8 +362,7 @@ bool Renderer::begin_one_time_submit() {
   cmd_buffer_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   cmd_buffer_info.pNext = nullptr;
   cmd_buffer_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  // Fill command buffer
-
+  vkResetFences(_device, 1, &_submit_buffer.fence);
   VK_CHECK(vkBeginCommandBuffer(_submit_buffer.buffer, &cmd_buffer_info),
            "Failed to begin command buffer");
   return true;
@@ -397,7 +387,6 @@ bool Renderer::end_one_time_submit() {
   VK_CHECK(vkQueueSubmit(_graphics_queue, 1, &submit, _submit_buffer.fence),
            "Failed to submit to queue");
   vkWaitForFences(_device, 1, &_submit_buffer.fence, true, 9999999999);
-  vkResetFences(_device, 1, &_submit_buffer.fence);
   vkResetCommandPool(_device, _submit_buffer.pool, 0);
   return true;
 }
@@ -482,10 +471,9 @@ bool Renderer::end_render_pass() {
   submit.commandBufferCount = 1;
   submit.pCommandBuffers = &_cmd_buffer;
 
-  if (vkGetFenceStatus(_device, _command_complete_fence) == VK_SUCCESS) {
-    vkResetFences(_device, 1, &_command_complete_fence);
-  }
-
+  vkResetFences(_device, 1,
+                &_command_complete_fence); // Can be safely reset because we
+                                           // already waited on it
   VK_CHECK(vkQueueSubmit(_graphics_queue, 1, &submit, _command_complete_fence),
            "Failed to submit to queue");
 

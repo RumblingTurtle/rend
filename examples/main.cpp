@@ -40,18 +40,19 @@ int main() {
       Path{Path{ASSET_DIRECTORY} / "shaders/bin/light_frag.spv"}, Path{});
 
   r_dingus_1->p_material = mat_dingus;
-  r_dingus_1->p_mesh = mesh_dingus;
   r_dingus_2->p_material = mat_dingus;
-  r_dingus_2->p_mesh = mesh_dingus;
-
   r_cube->p_material = light_mat;
+
+  r_dingus_1->p_mesh = mesh_dingus;
+  r_dingus_2->p_mesh = mesh_dingus;
   r_cube->p_mesh = mesh_cube;
 
-  r_dingus_1->object.scale = Eigen::Vector3f{0.5f, 0.5f, 0.5f};
+  r_dingus_1->object.scale = Eigen::Vector3f::Ones() * 0.5f;
+  r_dingus_2->object.scale = Eigen::Vector3f::Ones() * 0.2f;
+  r_cube->object.scale = Eigen::Vector3f::Ones() * 0.2f;
 
   r_dingus_2->object.rotation =
       Eigen::Quaternionf{Eigen::AngleAxisf{-M_PI_2, Eigen::Vector3f::UnitX()}};
-  r_dingus_2->object.scale = Eigen::Vector3f{0.2f, 0.2f, 0.2f};
   r_dingus_2->object.position = Eigen::Vector3f{0, 12, 0.0f};
 
   renderer.load_renderable(r_dingus_1);
@@ -60,7 +61,7 @@ int main() {
 
   audio_player.play();
 
-  renderer.lights[0].color = Eigen::Vector4f{1.0f, 1.0f, 1.0f, 1.0f};
+  renderer.lights[0].color = Eigen::Vector4f::Ones();
 
   Time::TimePoint t1 = Time::now();
   while (input_handler.poll() && renderer.draw()) {
