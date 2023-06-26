@@ -108,3 +108,8 @@ add_executable(${CMAKE_PROJECT_NAME}_example
 target_link_libraries(${CMAKE_PROJECT_NAME}_example
     ${CMAKE_PROJECT_NAME}
 )
+
+
+
+enable_testing()
+add_subdirectory(test)

@@ -316,17 +316,11 @@ bool Renderer::init_sync_primitives() {
 bool Renderer::init_descriptor_pool() {
   VkDescriptorPoolCreateInfo pool_info = {};
 
-  VkDescriptorPoolSize scene = {};
-  scene.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-  scene.descriptorCount = 10;
+  VkDescriptorPoolSize scene = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 10};
+  VkDescriptorPoolSize material = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                   10};
 
-  VkDescriptorPoolSize material = {};
-  material.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-  material.descriptorCount = 10;
-
-  VkDescriptorPoolSize model = {};
-  model.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-  model.descriptorCount = 10;
+  VkDescriptorPoolSize model = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 10};
 
   VkDescriptorPoolSize pool_sizes[3] = {scene, material, model};
 
