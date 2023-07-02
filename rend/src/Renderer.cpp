@@ -12,6 +12,8 @@ bool Renderer::init() {
   _window = SDL_CreateWindow("rend", SDL_WINDOWPOS_CENTERED,
                              SDL_WINDOWPOS_CENTERED, _window_dims.width,
                              _window_dims.height, SDL_WINDOW_VULKAN);
+  SDL_SetRelativeMouseMode(SDL_TRUE);
+
   _deallocator.push([=]() { SDL_DestroyWindow(_window); });
 
   if (_window == nullptr) {

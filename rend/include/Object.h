@@ -20,6 +20,11 @@ struct Object {
     model.block<3, 1>(0, 3) = position.head<3>();
     return model;
   }
+
+  // Using quaternions handles basis orthogonality
+  Eigen::Vector3f forward() { return rotation.toRotationMatrix().col(2); }
+  Eigen::Vector3f right() { return rotation.toRotationMatrix().col(0); }
+  Eigen::Vector3f up() { return rotation.toRotationMatrix().col(1); }
 };
 
 class Camera : public Object {

@@ -6,3 +6,6 @@
     std::cerr << err << std::endl << x << std::endl;                           \
     return false;                                                              \
   }
+
+#define CLAMP(x, low, high)                                                    \
+  (((x) > (high)) ? (high) : (((x) < (low)) ? (low) : (x)))
