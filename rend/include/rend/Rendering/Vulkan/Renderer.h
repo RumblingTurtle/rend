@@ -11,16 +11,15 @@
 
 #include <VkBootstrap.h>
 #include <vk_mem_alloc.h>
-#include <vk_struct_init.h>
 #include <vulkan/vulkan.h>
 
-#include <Mesh.h>
-#include <Object.h>
-#include <RenderPipelineBuilder.h>
-#include <Renderable.h>
-#include <constants.h>
-#include <macros.h>
-#include <types.h>
+#include <rend/Object.h>
+#include <rend/Rendering/Vulkan/Mesh.h>
+#include <rend/Rendering/Vulkan/RenderPipelineBuilder.h>
+#include <rend/Rendering/Vulkan/Renderable.h>
+#include <rend/Rendering/Vulkan/vk_helper_types.h>
+#include <rend/Rendering/Vulkan/vk_struct_init.h>
+#include <rend/macros.h>
 
 class Renderer {
   VkExtent2D _window_dims{1000, 1000};

@@ -1,6 +1,6 @@
 #pragma once
 #include <SDL2/SDL.h>
-#include <TimeUtils.h>
+#include <rend/TimeUtils.h>
 
 enum KeyCode { M_LEFT, M_RIGHT, SPACE, ESC, ENTER, W, A, S, D, KEY_CODE_COUNT };
 

@@ -1,10 +1,10 @@
 #pragma once
-#include <macros.h>
 #include <memory>
-#include <types.h>
+#include <rend/Rendering/Vulkan/vk_helper_types.h>
+#include <rend/Rendering/Vulkan/vk_struct_init.h>
+#include <rend/macros.h>
 #include <vector>
 #include <vk_mem_alloc.h>
-#include <vk_struct_init.h>
 #include <vulkan/vulkan.h>
 struct Binding {
   VkShaderStageFlags stage;

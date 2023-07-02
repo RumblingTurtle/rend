@@ -1,4 +1,4 @@
-#include <InputHandler.h>
+#include <rend/InputHandler.h>
 
 InputHandler::InputHandler() {
   for (int i = 0; i < KEY_CODE_COUNT; i++) {

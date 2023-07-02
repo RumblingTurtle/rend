@@ -1,14 +1,14 @@
-#include <Renderer.h>
+#include <rend/Rendering/Vulkan/Renderer.h>
 
-#include <Material.h>
-#include <Mesh.h>
-#include <Object.h>
-#include <Renderable.h>
+#include <rend/Object.h>
+#include <rend/Rendering/Vulkan/Material.h>
+#include <rend/Rendering/Vulkan/Mesh.h>
+#include <rend/Rendering/Vulkan/Renderable.h>
 
-#include <AudioPlayer.h>
-#include <InputHandler.h>
+#include <rend/Audio/AudioPlayer.h>
+#include <rend/InputHandler.h>
 
-#include <TimeUtils.h>
+#include <rend/TimeUtils.h>
 
 int main() {
   Renderer renderer{};
@@ -75,14 +75,14 @@ int main() {
         Eigen::Vector3f{10.0f * std::sin(time), 10.0f, 10.0f * std::cos(time)};
     r_cube->object.position = renderer.lights[0].position;
 
-    // r_dingus_1->object.position =
-    //     Eigen::Vector3f{20 * std::cos(time), 0.5f + std::cos(time), 0.0f};
-    // r_dingus_1->object.rotation = Eigen::Quaternionf{
-    //     Eigen::AngleAxisf{2 * time, Eigen::Vector3f::UnitY()} *
-    //     Eigen::AngleAxisf{-M_PI_2, Eigen::Vector3f::UnitX()}};
-    // r_dingus_2->object.rotation = Eigen::Quaternionf{
-    //     Eigen::AngleAxisf{-3 * time, Eigen::Vector3f::UnitX()} *
-    //     Eigen::AngleAxisf{M_PI, Eigen::Vector3f::UnitY()}};
+    r_dingus_1->object.position =
+        Eigen::Vector3f{20 * std::cos(time), 0.5f + std::cos(time), 0.0f};
+    r_dingus_1->object.rotation = Eigen::Quaternionf{
+        Eigen::AngleAxisf{2 * time, Eigen::Vector3f::UnitY()} *
+        Eigen::AngleAxisf{-M_PI_2, Eigen::Vector3f::UnitX()}};
+    r_dingus_2->object.rotation = Eigen::Quaternionf{
+        Eigen::AngleAxisf{-3 * time, Eigen::Vector3f::UnitX()} *
+        Eigen::AngleAxisf{M_PI, Eigen::Vector3f::UnitY()}};
 
     renderer.camera->position +=
         input_handler.is_key_held(KeyCode::W) * renderer.camera->forward() +

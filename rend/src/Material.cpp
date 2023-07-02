@@ -1,4 +1,4 @@
-#include <Material.h>
+#include <rend/Rendering/Vulkan/Material.h>
 
 Material::Material(Path vert_shader, Path frag_shader, Path texture_path) {
   if (vert_shader.native().size() != 0 && frag_shader.native().size() != 0) {

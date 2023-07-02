@@ -1,7 +1,6 @@
 #pragma once
-#include <macros.h>
 #include <memory>
-#include <types.h>
+#include <rend/macros.h>
 
 #include <Eigen/Dense>
 #include <assimp/Importer.hpp>
@@ -10,7 +9,8 @@
 
 #include <vk_mem_alloc.h>
 
-#include <Shader.h>
+#include <rend/Rendering/Vulkan/Shader.h>
+#include <rend/Rendering/Vulkan/vk_helper_types.h>
 class Mesh {
   // Contiguous chunk of vertices which is passed to the shader as is
   std::vector<float> _vertices;

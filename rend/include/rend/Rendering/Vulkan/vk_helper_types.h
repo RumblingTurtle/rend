@@ -3,6 +3,7 @@
 #include <deque>
 #include <filesystem>
 #include <functional>
+#include <iostream>
 #include <vector>
 #include <vk_mem_alloc.h>
 #include <vulkan/vulkan.h>

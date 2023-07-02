@@ -2,7 +2,7 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_mixer.h>
 #include <iostream>
-#include <types.h>
+#include <rend/Rendering/Vulkan/vk_helper_types.h>
 
 class AudioPlayer {
   bool _valid;

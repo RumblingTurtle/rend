@@ -1,8 +1,8 @@
 #pragma once
 #include <fstream>
-#include <macros.h>
+#include <rend/Rendering/Vulkan/vk_helper_types.h>
+#include <rend/macros.h>
 #include <string>
-#include <types.h>
 #include <vector>
 #include <vulkan/vulkan.h>
 

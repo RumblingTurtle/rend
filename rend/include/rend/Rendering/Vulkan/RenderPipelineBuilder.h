@@ -1,10 +1,10 @@
 #pragma once
-#include <DescriptorSet.h>
-#include <Shader.h>
 #include <iostream>
-#include <macros.h>
+#include <rend/Rendering/Vulkan/DescriptorSet.h>
+#include <rend/Rendering/Vulkan/Shader.h>
+#include <rend/Rendering/Vulkan/vk_struct_init.h>
+#include <rend/macros.h>
 #include <vector>
-#include <vk_struct_init.h>
 #include <vulkan/vulkan.h>
 
 class RenderPipelineBuilder {

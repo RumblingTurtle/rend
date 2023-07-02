@@ -1,8 +1,8 @@
 #pragma once
 
 #include <Eigen/Dense>
-#include <macros.h>
 #include <memory>
+#include <rend/macros.h>
 
 class LightSource {
 public:

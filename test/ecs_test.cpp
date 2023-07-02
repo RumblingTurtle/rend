@@ -1,7 +1,7 @@
-#include <ECS/EntityRegistry.h>
 #include <Eigen/Dense>
-#include <Object.h>
 #include <gtest/gtest.h>
+#include <rend/EntityRegistry.h>
+#include <rend/Object.h>
 
 namespace {
 class RegisterComponent : public ::testing::Test {

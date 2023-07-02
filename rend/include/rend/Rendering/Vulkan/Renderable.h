@@ -1,6 +1,6 @@
 #pragma once
-#include <Material.h>
-#include <Mesh.h>
+#include <rend/Rendering/Vulkan/Material.h>
+#include <rend/Rendering/Vulkan/Mesh.h>
 
 struct Renderable {
   typedef std::shared_ptr<Renderable> Ptr;

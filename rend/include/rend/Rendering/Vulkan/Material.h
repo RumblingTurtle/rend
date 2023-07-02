@@ -1,11 +1,12 @@
 #pragma once
-#include <DescriptorSet.h>
-#include <LightSource.h>
-#include <RenderPipelineBuilder.h>
-#include <Shader.h>
-#include <Texture.h>
-#include <constants.h>
 #include <memory>
+#include <rend/LightSource.h>
+#include <rend/Rendering/Vulkan/DescriptorSet.h>
+#include <rend/Rendering/Vulkan/RenderPipelineBuilder.h>
+#include <rend/Rendering/Vulkan/Shader.h>
+#include <rend/Rendering/Vulkan/Texture.h>
+
+constexpr int MAX_LIGHTS = 8;
 
 class Material {
   RenderPipelineBuilder _pipeline_builder{};
