@@ -71,6 +71,7 @@ set(${CMAKE_PROJECT_NAME}_SOURCES
     rend/src/Mesh.cpp    
     rend/src/Material.cpp  
     rend/src/Texture.cpp
+    rend/src/EntityRegistry.cpp
 )
 
 add_library(${CMAKE_PROJECT_NAME} 

@@ -21,6 +21,8 @@
 #include <rend/Rendering/Vulkan/vk_struct_init.h>
 #include <rend/macros.h>
 
+#include <rend/EntityRegistry.h>
+
 class Renderer {
   static constexpr int MAX_DEBUG_STRIPS = 300;
 
@@ -62,7 +64,8 @@ class Renderer {
   // VMA allocator
   VmaAllocator _allocator;
 
-  std::unordered_map<Material *, std::vector<Renderable::Ptr>> _renderables;
+  std::unordered_map<Material *, std::vector<std::pair<Renderable, ECS::EID>>>
+      _renderables;
 
   Deallocator _deallocator;
 
@@ -121,8 +124,8 @@ public:
 
   bool init_debug_renderable();
 
-  // Registers renderable object to the render queue
-  bool load_renderable(Renderable::Ptr renderable);
+  // Caches enity's renderable component + allocates mesh buffer
+  bool load_renderable(ECS::EID eid);
 
   // Starts submission command buffer recording
   bool begin_one_time_submit();

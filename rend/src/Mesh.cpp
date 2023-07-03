@@ -1,9 +1,9 @@
 #include <rend/Rendering/Vulkan/Mesh.h>
 
-bool Mesh::load(Path path) {
+Mesh::Mesh(Path path) {
   if (path.native().size() == 0) {
-    std::cerr << "Mesh path is empty" << std::endl;
-    return false;
+
+    throw std::runtime_error("Mesh path is empty");
   }
   _mesh_path = path;
 
@@ -28,11 +28,9 @@ bool Mesh::load(Path path) {
         _vertices[f * 24 + v * 8 + 7] = 1 - mesh->mTextureCoords[0][v_idx].y;
       }
     }
-    return true;
+  } else {
+    throw std::runtime_error("Error loading mesh: " + path.native());
   }
-
-  std::cerr << "Error loading mesh: " << path << std::endl;
-  return false;
 }
 
 int Mesh::vertex_count() { return _vertex_count; }

@@ -25,7 +25,7 @@ public:
   Path _mesh_path;
 
   // Loads a mesh, it's shaders and fills the vertex buffer
-  bool load(Path path);
+  Mesh(Path path);
   int vertex_count();
   bool generate_allocation_buffer(VmaAllocator &allocator,
                                   Deallocator &deallocator_queue);

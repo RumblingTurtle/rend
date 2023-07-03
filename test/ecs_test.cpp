@@ -19,7 +19,7 @@ TEST_F(RegisterComponent, CounterTest) {
 }
 
 TEST_F(RegisterComponent, EntityFlagsAllocatedTest) {
-  ASSERT_EQ(registry->entities.capacity(), ECS::MAX_ENTITIES);
+  ASSERT_EQ(registry->component_rows.capacity(), ECS::MAX_COMPONENTS + 1);
 }
 } // namespace
 
@@ -36,7 +36,7 @@ protected:
 };
 
 TEST_F(RegisterEntity, EnabledFlagActiveTest) {
-  ASSERT_TRUE(registry->entities[eid].is_entity_enabled());
+  ASSERT_TRUE(registry->is_entity_enabled(eid));
 }
 
 TEST_F(RegisterEntity, ComponentEnabledTest) {

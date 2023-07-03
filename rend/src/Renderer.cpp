@@ -364,12 +364,21 @@ bool Renderer::init_debug_renderable() {
   return true;
 }
 
-bool Renderer::load_renderable(Renderable::Ptr renderable) {
-  if (_renderables.find(renderable->p_material.get()) == _renderables.end()) {
-    _renderables[renderable->p_material.get()] = std::vector<Renderable::Ptr>();
+bool Renderer::load_renderable(ECS::EID r_id) {
+  ECS::EntityRegistry &registry = ECS::EntityRegistry::get_entity_registry();
+  if (!registry.is_component_enabled<Renderable>(r_id)) {
+    std::cerr << "Entity " << r_id << " does not have a renderable component"
+              << std::endl;
+    return false;
   }
-  renderable->p_mesh->generate_allocation_buffer(_allocator, _deallocator);
-  _renderables[renderable->p_material.get()].push_back(renderable);
+
+  Renderable &renderable = registry.get_component<Renderable>(r_id);
+  Material *p_material = renderable.p_material.get();
+  if (_renderables.find(p_material) == _renderables.end()) {
+    _renderables[p_material] = std::vector<std::pair<Renderable, ECS::EID>>();
+  }
+  renderable.p_mesh->generate_allocation_buffer(_allocator, _deallocator);
+  _renderables[p_material].push_back(std::make_pair(renderable, r_id));
   return true;
 }
 
@@ -632,20 +641,24 @@ bool Renderer::draw() {
       material->update_lights(lights);
     }
 
-    for (Renderable::Ptr p_renderable : pair.second) {
+    for (std::pair<Renderable, ECS::EID> &renderable_data : pair.second) {
       VkDeviceSize offset = 0;
+      Renderable &renderable = renderable_data.first;
+      Object &object =
+          ECS::EntityRegistry::get_entity_registry().get_component<Object>(
+              renderable_data.second);
       vkCmdBindVertexBuffers(_cmd_buffer, 0, 1,
-                             &p_renderable->p_mesh->buffer_allocation.buffer,
+                             &renderable.p_mesh->buffer_allocation.buffer,
                              &offset);
 
-      Eigen::Matrix4f model = p_renderable->object.get_model_matrix();
+      Eigen::Matrix4f model = object.get_model_matrix();
 
       PushConstants constants;
       memcpy(constants.model, model.data(), sizeof(float) * model.size());
       vkCmdPushConstants(_cmd_buffer, material->pipeline_layout,
                          VK_SHADER_STAGE_VERTEX_BIT, 0, 16 * sizeof(float),
                          &constants);
-      vkCmdDraw(_cmd_buffer, p_renderable->p_mesh->vertex_count(), 1, 0, 0);
+      vkCmdDraw(_cmd_buffer, renderable.p_mesh->vertex_count(), 1, 0, 0);
 
       //  vkCmdBindPipeline(_cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
       //                    debug_renderable.material.pipeline);
