@@ -13,18 +13,17 @@ struct Object {
     rotation = Eigen::Quaternionf::Identity();
   }
 
-  Eigen::Matrix4f get_model_matrix() {
-    Eigen::Matrix4f model;
-    model.setIdentity();
+  Eigen::Matrix4f get_model_matrix() const {
+    Eigen::Matrix4f model = Eigen::Matrix4f::Identity();
     model.block<3, 3>(0, 0) = rotation.toRotationMatrix() * scale.asDiagonal();
     model.block<3, 1>(0, 3) = position.head<3>();
     return model;
   }
 
   // Using quaternions handles basis orthogonality
-  Eigen::Vector3f forward() { return rotation.toRotationMatrix().col(2); }
-  Eigen::Vector3f right() { return rotation.toRotationMatrix().col(0); }
-  Eigen::Vector3f up() { return rotation.toRotationMatrix().col(1); }
+  Eigen::Vector3f forward() const { return rotation.toRotationMatrix().col(2); }
+  Eigen::Vector3f right() const { return rotation.toRotationMatrix().col(0); }
+  Eigen::Vector3f up() const { return rotation.toRotationMatrix().col(1); }
 };
 
 class Camera : public Object {

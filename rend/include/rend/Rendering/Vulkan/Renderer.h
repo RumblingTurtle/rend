@@ -24,7 +24,7 @@
 #include <rend/EntityRegistry.h>
 
 class Renderer {
-  static constexpr int MAX_DEBUG_STRIPS = 300;
+  static constexpr int MAX_DEBUG_STRIPS = 100;
 
   VkExtent2D _window_dims{1000, 1000};
   SDL_Window *_window;

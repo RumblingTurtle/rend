@@ -37,6 +37,11 @@ bool EntityRegistry::is_component_enabled(EID id, int component_index) {
   return component_rows[component_index].mask.test(id);
 }
 
+template <typename T> bool EntityRegistry::is_component_registered() {
+  return component_indices.find(typeid(T).hash_code()) !=
+         component_indices.end();
+}
+
 template <typename T> bool EntityRegistry::is_component_enabled(EID id) {
   int component_index = get_component_index<T>();
   if (id >= MAX_ENTITIES) {
@@ -49,7 +54,7 @@ template <typename T> bool EntityRegistry::is_component_enabled(EID id) {
   return is_component_enabled(id, component_index);
 }
 
-template <typename T> void EntityRegistry::add_component(EID id) {
+template <typename T> T &EntityRegistry::add_component(EID id) {
   if (id >= MAX_ENTITIES) {
     throw std::runtime_error("ECS: Entity ID out of range");
   }
@@ -73,6 +78,7 @@ template <typename T> void EntityRegistry::add_component(EID id) {
           component_pools[component_index]);
   pool->components[id] = T{}; // Default construct component
   component_rows[component_index].mask.flip(id);
+  return pool->components[id];
 }
 
 template <typename T> void EntityRegistry::remove_component(EID id) {
@@ -146,5 +152,6 @@ EntityRegistry::EntityRegistry() {
 
 REGISTER_COMPONENT(Object);
 REGISTER_COMPONENT(Renderable);
+REGISTER_COMPONENT(AABB);
 
 } // namespace ECS

@@ -26,22 +26,19 @@ int main() {
   ECS::EntityRegistry &registry = ECS::EntityRegistry::get_entity_registry();
   registry.register_component<Object>();
   registry.register_component<Renderable>();
+  registry.register_component<AABB>();
 
   ECS::EID dingus1 = registry.register_entity();
   ECS::EID dingus2 = registry.register_entity();
   ECS::EID cube = registry.register_entity();
 
-  registry.add_component<Object>(dingus1);
-  registry.add_component<Object>(dingus2);
-  registry.add_component<Object>(cube);
+  Object &dingus1_object = registry.add_component<Object>(dingus1);
+  Object &dingus2_object = registry.add_component<Object>(dingus2);
+  Object &cube_object = registry.add_component<Object>(cube);
 
-  registry.add_component<Renderable>(dingus1);
-  registry.add_component<Renderable>(dingus2);
-  registry.add_component<Renderable>(cube);
-
-  Renderable &dingus1_renderable = registry.get_component<Renderable>(dingus1);
-  Renderable &dingus2_renderable = registry.get_component<Renderable>(dingus2);
-  Renderable &cube_renderable = registry.get_component<Renderable>(cube);
+  Renderable &dingus1_renderable = registry.add_component<Renderable>(dingus1);
+  Renderable &dingus2_renderable = registry.add_component<Renderable>(dingus2);
+  Renderable &cube_renderable = registry.add_component<Renderable>(cube);
 
   dingus1_renderable.p_mesh =
       std::make_shared<Mesh>(Path{ASSET_DIRECTORY} / Path{"models/dingus.fbx"});
@@ -63,13 +60,15 @@ int main() {
                             VK_FORMAT_R32G32B32_SFLOAT,
                             VK_FORMAT_R32G32_SFLOAT});
 
-  Object &dingus1_object = registry.get_component<Object>(dingus1);
-  Object &dingus2_object = registry.get_component<Object>(dingus2);
-  Object &cube_object = registry.get_component<Object>(cube);
-
   dingus1_object.scale = Eigen::Vector3f::Ones() * 0.5f;
   dingus2_object.scale = Eigen::Vector3f::Ones() * 0.2f;
   cube_object.scale = Eigen::Vector3f::Ones() * 0.2f;
+
+  AABB &aabb1 = registry.add_component<AABB>(dingus1);
+  aabb1.compute(*dingus1_renderable.p_mesh, dingus1_object);
+
+  AABB &aabb2 = registry.add_component<AABB>(dingus2);
+  aabb2.compute(*dingus2_renderable.p_mesh, dingus2_object);
 
   dingus1_object.rotation =
       Eigen::Quaternionf{Eigen::AngleAxisf{-M_PI_2, Eigen::Vector3f::UnitX()}};

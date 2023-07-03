@@ -44,10 +44,11 @@ struct EntityRegistry {
   bool is_entity_enabled(EID id);
   bool is_component_enabled(EID id, int component_index);
 
+  template <typename T> bool is_component_registered();
   template <typename T> void register_component();
   template <typename T> int get_component_index();
   template <typename T> bool is_component_enabled(EID id);
-  template <typename T> void add_component(EID id);
+  template <typename T> T &add_component(EID id);
   template <typename T> void remove_component(EID id);
   template <typename T> T &get_component(EID id);
 
@@ -84,5 +85,4 @@ private:
   void operator=(EntityRegistry &&) = delete;
 };
 
-extern EntityRegistry entity_registry;
 } // namespace ECS
