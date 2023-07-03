@@ -671,50 +671,9 @@ bool Renderer::draw() {
           AABB aabb =
               entity_registry.get_component<AABB>(renderable_data.second)
                   .compute_world_frame(object);
-          Eigen::Matrix<float, 8, 4> vertices = aabb.get_vertices();
 
           float strips[72];
-          memset(strips, 0, sizeof(strips));
-          for (int edge = 0; edge < 4; edge++) {
-            /**
-             * Top strip
-             * t1 ---- t2/|
-             * |        | |Side strip
-             * |        | |
-             * b1 ---- b2/
-             * Bottom strip
-             */
-            int b1 = edge % 4;
-            int b2 = (edge + 1) % 4;
-
-            strips[edge * 18 + 0] = vertices.row(b1)[0];
-            strips[edge * 18 + 1] = vertices.row(b1)[1];
-            strips[edge * 18 + 2] = vertices.row(b1)[2];
-
-            strips[edge * 18 + 3] = vertices.row(b2)[0];
-            strips[edge * 18 + 4] = vertices.row(b2)[1];
-            strips[edge * 18 + 5] = vertices.row(b2)[2];
-
-            int t1 = 4 + edge % 4;
-            int t2 = 4 + (edge + 1) % 4;
-
-            strips[edge * 18 + 6] = vertices.row(t1)[0];
-            strips[edge * 18 + 7] = vertices.row(t1)[1];
-            strips[edge * 18 + 8] = vertices.row(t1)[2];
-
-            strips[edge * 18 + 9] = vertices.row(t2)[0];
-            strips[edge * 18 + 10] = vertices.row(t2)[1];
-            strips[edge * 18 + 11] = vertices.row(t2)[2];
-
-            // Connecting top and bottom stips
-            strips[edge * 18 + 12] = vertices.row(b1)[0];
-            strips[edge * 18 + 13] = vertices.row(b1)[1];
-            strips[edge * 18 + 14] = vertices.row(b1)[2];
-
-            strips[edge * 18 + 15] = vertices.row(t1)[0];
-            strips[edge * 18 + 16] = vertices.row(t1)[1];
-            strips[edge * 18 + 17] = vertices.row(t1)[2];
-          }
+          aabb.get_line_strips(strips);
 
           debug_renderable.buffer.copy_from(strips, sizeof(strips),
                                             debug_offset);
@@ -731,14 +690,6 @@ bool Renderer::draw() {
                       debug_renderable.material.pipeline);
     vkCmdBindVertexBuffers(_cmd_buffer, 0, 1, &debug_renderable.buffer.buffer,
                            &offset);
-
-    // Debug renderables
-    PushConstants constants;
-    Eigen::Matrix4f model = Eigen::Matrix4f::Identity();
-    memcpy(constants.model, model.data(), sizeof(float) * model.size());
-    vkCmdPushConstants(_cmd_buffer, debug_renderable.material.pipeline_layout,
-                       VK_SHADER_STAGE_VERTEX_BIT, 0, 16 * sizeof(float),
-                       &constants);
     vkCmdDraw(_cmd_buffer, debug_offset / (sizeof(float) * 3), 1, 0, 0);
   }
 
