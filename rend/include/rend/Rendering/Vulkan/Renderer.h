@@ -23,8 +23,11 @@
 
 #include <rend/EntityRegistry.h>
 
+constexpr int MAX_DEBUG_STRIPS = 200;
+constexpr int DEBUG_GRID_STRIP_COUNT = 30; // Strips per grid dimension
+constexpr float DEBUG_GRID_SPAN = 500;     // Meters
+
 class Renderer {
-  static constexpr int MAX_DEBUG_STRIPS = 100;
 
   VkExtent2D _window_dims{1000, 1000};
   SDL_Window *_window;
@@ -86,6 +89,8 @@ class Renderer {
     BufferAllocation buffer;
     Material material;
   } debug_renderable;
+
+  float _debug_grid_strips[DEBUG_GRID_STRIP_COUNT * 12];
 
 public:
   std::unique_ptr<Camera> camera;
