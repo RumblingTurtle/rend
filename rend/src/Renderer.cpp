@@ -618,6 +618,8 @@ bool Renderer::draw() {
   Eigen::Matrix4f projection = camera->get_projection_matrix();
   Eigen::Matrix4f view = camera->get_view_matrix();
 
+  int debug_offset = 0;
+
   Material *prev_material = nullptr;
   for (auto &pair : _renderables) {
     Material *material = pair.first;
@@ -659,8 +661,71 @@ bool Renderer::draw() {
                            &constants);
         vkCmdDraw(_cmd_buffer, renderable.p_mesh->vertex_count(), 1, 0, 0);
       }
-    }
 
+      { // Debug data
+        if (entity_registry.is_component_enabled<AABB>(
+                renderable_data.second)) {
+          Object &object =
+              entity_registry.get_component<Object>(renderable_data.second);
+
+          AABB aabb =
+              entity_registry.get_component<AABB>(renderable_data.second)
+                  .compute_world_frame(object);
+          Eigen::Matrix<float, 8, 4> vertices = aabb.get_vertices();
+
+          float strips[72];
+          memset(strips, 0, sizeof(strips));
+          for (int edge = 0; edge < 4; edge++) {
+            /**
+             * Top strip
+             * t1 ---- t2/|
+             * |        | |Side strip
+             * |        | |
+             * b1 ---- b2/
+             * Bottom strip
+             */
+            int b1 = edge % 4;
+            int b2 = (edge + 1) % 4;
+
+            strips[edge * 18 + 0] = vertices.row(b1)[0];
+            strips[edge * 18 + 1] = vertices.row(b1)[1];
+            strips[edge * 18 + 2] = vertices.row(b1)[2];
+
+            strips[edge * 18 + 3] = vertices.row(b2)[0];
+            strips[edge * 18 + 4] = vertices.row(b2)[1];
+            strips[edge * 18 + 5] = vertices.row(b2)[2];
+
+            int t1 = 4 + edge % 4;
+            int t2 = 4 + (edge + 1) % 4;
+
+            strips[edge * 18 + 6] = vertices.row(t1)[0];
+            strips[edge * 18 + 7] = vertices.row(t1)[1];
+            strips[edge * 18 + 8] = vertices.row(t1)[2];
+
+            strips[edge * 18 + 9] = vertices.row(t2)[0];
+            strips[edge * 18 + 10] = vertices.row(t2)[1];
+            strips[edge * 18 + 11] = vertices.row(t2)[2];
+
+            // Connecting top and bottom stips
+            strips[edge * 18 + 12] = vertices.row(b1)[0];
+            strips[edge * 18 + 13] = vertices.row(b1)[1];
+            strips[edge * 18 + 14] = vertices.row(b1)[2];
+
+            strips[edge * 18 + 15] = vertices.row(t1)[0];
+            strips[edge * 18 + 16] = vertices.row(t1)[1];
+            strips[edge * 18 + 17] = vertices.row(t1)[2];
+          }
+
+          debug_renderable.buffer.copy_from(strips, sizeof(strips),
+                                            debug_offset);
+          debug_offset += sizeof(strips);
+        }
+      }
+    }
+  }
+
+  // Debug buffer was altered
+  if (debug_offset > 0) {
     VkDeviceSize offset = 0;
     vkCmdBindPipeline(_cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                       debug_renderable.material.pipeline);
@@ -674,69 +739,7 @@ bool Renderer::draw() {
     vkCmdPushConstants(_cmd_buffer, debug_renderable.material.pipeline_layout,
                        VK_SHADER_STAGE_VERTEX_BIT, 0, 16 * sizeof(float),
                        &constants);
-
-    int debug_offset = 0;
-    for (std::pair<Renderable, ECS::EID> &renderable_data : pair.second) {
-      Renderable &renderable = renderable_data.first;
-
-      if (entity_registry.is_component_enabled<AABB>(renderable_data.second)) {
-        Object &object =
-            entity_registry.get_component<Object>(renderable_data.second);
-
-        AABB aabb = entity_registry.get_component<AABB>(renderable_data.second)
-                        .compute_world_frame(object);
-        Eigen::Matrix<float, 8, 4> vertices = aabb.get_vertices();
-
-        float strips[72];
-        memset(strips, 0, sizeof(strips));
-        for (int edge = 0; edge < 4; edge++) {
-          /**
-           * Top strip
-           * t1 ---- t2/|
-           * |        | |Side strip
-           * |        | |
-           * b1 ---- b2/
-           * Bottom strip
-           */
-          int b1 = edge % 4;
-          int b2 = (edge + 1) % 4;
-
-          strips[edge * 18 + 0] = vertices.row(b1)[0];
-          strips[edge * 18 + 1] = vertices.row(b1)[1];
-          strips[edge * 18 + 2] = vertices.row(b1)[2];
-
-          strips[edge * 18 + 3] = vertices.row(b2)[0];
-          strips[edge * 18 + 4] = vertices.row(b2)[1];
-          strips[edge * 18 + 5] = vertices.row(b2)[2];
-
-          int t1 = 4 + edge % 4;
-          int t2 = 4 + (edge + 1) % 4;
-
-          strips[edge * 18 + 6] = vertices.row(t1)[0];
-          strips[edge * 18 + 7] = vertices.row(t1)[1];
-          strips[edge * 18 + 8] = vertices.row(t1)[2];
-
-          strips[edge * 18 + 9] = vertices.row(t2)[0];
-          strips[edge * 18 + 10] = vertices.row(t2)[1];
-          strips[edge * 18 + 11] = vertices.row(t2)[2];
-
-          // Connecting top and bottom stips
-          strips[edge * 18 + 12] = vertices.row(b1)[0];
-          strips[edge * 18 + 13] = vertices.row(b1)[1];
-          strips[edge * 18 + 14] = vertices.row(b1)[2];
-
-          strips[edge * 18 + 15] = vertices.row(t1)[0];
-          strips[edge * 18 + 16] = vertices.row(t1)[1];
-          strips[edge * 18 + 17] = vertices.row(t1)[2];
-        }
-
-        debug_renderable.buffer.copy_from(strips, sizeof(strips), debug_offset);
-        debug_offset += sizeof(strips);
-      }
-      if (debug_offset > 0) {
-        vkCmdDraw(_cmd_buffer, debug_offset / sizeof(float), 1, 0, 0);
-      }
-    }
+    vkCmdDraw(_cmd_buffer, debug_offset / (sizeof(float) * 3), 1, 0, 0);
   }
 
   end_render_pass();
