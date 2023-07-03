@@ -42,12 +42,12 @@ public:
                       VkExtent2D extent, Shader &shader,
                       VkPipelineLayout &_pipeline_layout,
                       VertexInfoDescription &vertex_info_description,
-                      VkPipeline &newPipeline) {
+                      VkPipeline &newPipeline, VkPrimitiveTopology topology) {
 
     _depth_stencil_create_info = vk_struct_init::get_depth_stencil_create_info(
         true, true, VK_COMPARE_OP_LESS_OR_EQUAL);
     set_vertex_input_state_create_info(vertex_info_description);
-    set_input_assembly_create_info(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+    set_input_assembly_create_info(topology);
     // Configure the rasterizer to draw filled triangles
     set_rasterization_state_create_info(VK_POLYGON_MODE_FILL);
     // a single blend attachment with no blending and writing to RGBA

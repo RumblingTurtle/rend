@@ -4,10 +4,14 @@
 
 bool Texture::load(Path path) {
   texture_path = path;
-  int orig_stride;
+
   if (!std::filesystem::exists(path)) {
     texture_path = Path(ASSET_DIRECTORY + std::string{"/textures/error.jpg"});
+    valid = false;
+  } else {
+    valid = true;
   }
+
   _raw_pixels = stbi_load(path.native().c_str(), &width, &height, &channels,
                           STBI_rgb_alpha);
   channels = STBI_rgb_alpha;

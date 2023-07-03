@@ -3,9 +3,9 @@
 #include <any>
 #include <bitset>
 #include <iostream>
-#include <map>
 #include <memory>
 #include <typeinfo>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -40,7 +40,7 @@ struct EntityRegistry {
   std::vector<RegistryEntry> entities;   // Entity component flags
   std::vector<std::any> component_pools; // Allocated components pools
   std::unordered_set<EID> registered_entities;
-  std::map<std::size_t, int>
+  std::unordered_map<std::size_t, int>
       component_indices; // Component type hash -> index in the pool
 
   template <typename T> void register_component() {

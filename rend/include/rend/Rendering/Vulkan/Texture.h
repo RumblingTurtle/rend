@@ -6,11 +6,11 @@
 #include <vector>
 #include <vk_mem_alloc.h>
 
-class Texture {
+struct Texture {
   unsigned char *_raw_pixels;
   bool _buffer_generated = false;
+  bool valid;
 
-public:
   Path texture_path;
   int width, height, channels;
 

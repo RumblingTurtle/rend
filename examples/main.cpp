@@ -33,11 +33,17 @@ int main() {
   mesh_cube->load(Path{ASSET_DIRECTORY} / Path{"models/cube.obj"});
 
   std::shared_ptr<Material> mat_dingus = std::make_shared<Material>(
-      Path{}, Path{}, Path{ASSET_DIRECTORY} / "textures/dingus_nowhiskers.jpg");
+      Path{}, Path{}, Path{ASSET_DIRECTORY} / "textures/dingus_nowhiskers.jpg",
+      std::vector<VkFormat>{VK_FORMAT_R32G32B32_SFLOAT,
+                            VK_FORMAT_R32G32B32_SFLOAT,
+                            VK_FORMAT_R32G32_SFLOAT});
 
   std::shared_ptr<Material> light_mat = std::make_shared<Material>(
       Path{Path{ASSET_DIRECTORY} / "shaders/bin/light_vert.spv"},
-      Path{Path{ASSET_DIRECTORY} / "shaders/bin/light_frag.spv"}, Path{});
+      Path{Path{ASSET_DIRECTORY} / "shaders/bin/light_frag.spv"}, Path{},
+      std::vector<VkFormat>{VK_FORMAT_R32G32B32_SFLOAT,
+                            VK_FORMAT_R32G32B32_SFLOAT,
+                            VK_FORMAT_R32G32_SFLOAT});
 
   r_dingus_1->p_material = mat_dingus;
   r_dingus_2->p_material = mat_dingus;
@@ -101,5 +107,6 @@ int main() {
     }
   }
 
+  renderer.cleanup();
   return 0;
 }

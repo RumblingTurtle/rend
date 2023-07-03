@@ -2,8 +2,8 @@
 
 #include <exception>
 #include <iostream>
-#include <map>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 #include <SDL2/SDL.h>
@@ -22,6 +22,8 @@
 #include <rend/macros.h>
 
 class Renderer {
+  static constexpr int MAX_DEBUG_STRIPS = 300;
+
   VkExtent2D _window_dims{1000, 1000};
   SDL_Window *_window;
   VkInstance _instance;
@@ -60,7 +62,7 @@ class Renderer {
   // VMA allocator
   VmaAllocator _allocator;
 
-  std::map<Material *, std::vector<Renderable::Ptr>> _renderables;
+  std::unordered_map<Material *, std::vector<Renderable::Ptr>> _renderables;
 
   Deallocator _deallocator;
 
@@ -77,6 +79,11 @@ class Renderer {
 
   VkDeviceSize min_ubo_alignment;
 
+  struct {
+    BufferAllocation buffer;
+    Material material;
+  } debug_renderable;
+
 public:
   std::unique_ptr<Camera> camera;
   std::vector<LightSource> lights;
@@ -86,8 +93,6 @@ public:
         90.f, _window_dims.width / _window_dims.height, 0.1f, 200.0f);
     lights.resize(MAX_LIGHTS);
   };
-
-  ~Renderer();
 
   bool init();
 
@@ -114,6 +119,8 @@ public:
 
   bool init_descriptor_pool();
 
+  bool init_debug_renderable();
+
   // Registers renderable object to the render queue
   bool load_renderable(Renderable::Ptr renderable);
 
@@ -126,9 +133,14 @@ public:
   // Checks if all submited materials are built
   bool check_materials();
 
+  void init_material(Material &material);
+  void transfer_texture_to_gpu(Texture &texture);
+
   bool begin_render_pass();
 
   bool end_render_pass();
 
   bool draw();
+
+  void cleanup();
 };

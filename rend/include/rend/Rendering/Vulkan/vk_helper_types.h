@@ -115,12 +115,6 @@ struct ImageAllocation {
   }
 };
 
-struct VertexInfoDescription {
-  std::vector<VkVertexInputBindingDescription> bindings;
-  std::vector<VkVertexInputAttributeDescription> attributes;
-  VkPipelineVertexInputStateCreateFlags flags = 0;
-};
-
 // Simple functor queue for deferred deallocation
 struct Deallocator {
   std::deque<std::function<void()>> _deletion_queue;
@@ -128,10 +122,43 @@ struct Deallocator {
     _deletion_queue.push_back(std::move(function));
   }
 
-  ~Deallocator() {
+  void cleanup() {
     while (!_deletion_queue.empty()) {
       _deletion_queue.back()();
       _deletion_queue.pop_back();
     }
   }
 };
+
+struct VertexInfoDescription {
+  std::vector<VkVertexInputBindingDescription> bindings;
+  std::vector<VkVertexInputAttributeDescription> attributes;
+  VkPipelineVertexInputStateCreateFlags flags = 0;
+};
+
+static std::unordered_map<VkFormat, int> FORMAT_SIZES = {
+    {VK_FORMAT_R32G32B32_SFLOAT, 3 * sizeof(float)},
+    {VK_FORMAT_R32G32_SFLOAT, 2 * sizeof(float)},
+    {VK_FORMAT_R32_SFLOAT, sizeof(float)},
+};
+
+inline VertexInfoDescription
+get_vertex_info_description(std::vector<VkFormat> attributes) {
+  VertexInfoDescription description;
+  VkVertexInputBindingDescription mainBinding = {};
+  mainBinding.binding = 0;
+  mainBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+  int stride = 0;
+  for (int i = 0; i < attributes.size(); i++) {
+    VkVertexInputAttributeDescription attr = {};
+    attr.binding = 0;
+    attr.location = i;
+    attr.format = attributes[i];
+    attr.offset = stride;
+    stride += FORMAT_SIZES[attributes[i]];
+    description.attributes.push_back(attr);
+  }
+  mainBinding.stride = stride;
+  description.bindings.push_back(mainBinding);
+  return description;
+}

@@ -1,18 +1,19 @@
 #include <rend/Rendering/Vulkan/Renderer.h>
 
-Renderer::~Renderer() {
+void Renderer::cleanup() {
   if (!_initialized)
     return;
 
   // Wait for the command queue to complete if still running
   vkWaitForFences(_device, 1, &_command_complete_fence, VK_TRUE, 1000000000);
+  _deallocator.cleanup();
 }
 
 bool Renderer::init() {
   _window = SDL_CreateWindow("rend", SDL_WINDOWPOS_CENTERED,
                              SDL_WINDOWPOS_CENTERED, _window_dims.width,
                              _window_dims.height, SDL_WINDOW_VULKAN);
-  SDL_SetRelativeMouseMode(SDL_TRUE);
+  // SDL_SetRelativeMouseMode(SDL_TRUE);
 
   _deallocator.push([=]() { SDL_DestroyWindow(_window); });
 
@@ -318,11 +319,11 @@ bool Renderer::init_sync_primitives() {
 bool Renderer::init_descriptor_pool() {
   VkDescriptorPoolCreateInfo pool_info = {};
 
-  VkDescriptorPoolSize scene = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 10};
+  VkDescriptorPoolSize scene = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 20};
   VkDescriptorPoolSize material = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                                   10};
+                                   20};
 
-  VkDescriptorPoolSize model = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 10};
+  VkDescriptorPoolSize model = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 20};
 
   VkDescriptorPoolSize pool_sizes[3] = {scene, material, model};
 
@@ -339,6 +340,27 @@ bool Renderer::init_descriptor_pool() {
 
   _deallocator.push(
       [=] { vkDestroyDescriptorPool(_device, _descriptor_pool, nullptr); });
+  return true;
+}
+
+bool Renderer::init_debug_renderable() {
+  debug_renderable.buffer =
+      BufferAllocation::create(3 * sizeof(float) * 2 * MAX_DEBUG_STRIPS,
+                               VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                               VMA_MEMORY_USAGE_CPU_TO_GPU, _allocator);
+  debug_renderable.material =
+      Material{Path{ASSET_DIRECTORY} / "shaders/bin/debug_vert.spv",
+               Path{ASSET_DIRECTORY} / "shaders/bin/debug_frag.spv",
+               {},
+               std::vector<VkFormat>{VK_FORMAT_R32G32B32_SFLOAT}};
+  debug_renderable.material.topology_type = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+  init_material(debug_renderable.material);
+  _deallocator.push([&] { debug_renderable.buffer.destroy(); });
+
+  float dummy_points[18] = {0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f,
+                            0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f,
+                            1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
+  debug_renderable.buffer.copy_from(dummy_points, sizeof(float) * 18);
   return true;
 }
 
@@ -491,93 +513,94 @@ bool Renderer::end_render_pass() {
   return true;
 }
 
+// Check if the material has been built, if not build it and send it's texture
+// to GPU
 bool Renderer::check_materials() {
+  if (debug_renderable.buffer.buffer == VK_NULL_HANDLE) {
+    init_debug_renderable();
+  }
   for (auto &pair : _renderables) {
-
     if (!pair.first->pipeline_built()) {
-      pair.first->bind_allocator(_allocator);
-
-      if (!pair.first->allocate_texture(_device, _deallocator)) {
-        throw std::runtime_error("Failed to allocate texture");
-      }
-
-      pair.first->init_descriptor_sets(_device, _descriptor_pool, _deallocator);
-      pair.first->bind_buffers_and_images();
-      pair.first->build_pipeline(_device, _render_pass, _window_dims,
-                                 _deallocator);
-
-      // Create a cpu side buffer for the texture
-      BufferAllocation staging_buffer =
-          BufferAllocation::create(pair.first->texture.get_pixels_size(),
-                                   VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                                   VMA_MEMORY_USAGE_CPU_TO_GPU, _allocator);
-
-      staging_buffer.copy_from((void *)pair.first->texture.get_pixels(),
-                               pair.first->texture.get_pixels_size());
-
-      // Change the layout of the texture to be linear as the staging buffer
-      VkImageSubresourceRange range;
-      range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-      range.baseMipLevel = 0;
-      range.levelCount = 1;
-      range.baseArrayLayer = 0;
-      range.layerCount = 1;
-
-      begin_one_time_submit();
-      VkImageMemoryBarrier barrier_info = {};
-      barrier_info.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-      barrier_info.image = pair.first->texture.image_allocation.image;
-      barrier_info.subresourceRange = range;
-
-      barrier_info.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-      barrier_info.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-
-      barrier_info.srcAccessMask = 0;
-      barrier_info.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-
-      vkCmdPipelineBarrier(_submit_buffer.buffer,
-                           VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                           VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
-                           nullptr, 1, &barrier_info);
-      // Copy the staging buffer to the image
-      VkBufferImageCopy copyRegion = {};
-      copyRegion.bufferOffset = 0;
-      copyRegion.bufferRowLength = 0;
-      copyRegion.bufferImageHeight = 0;
-
-      copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-      copyRegion.imageSubresource.mipLevel = 0;
-      copyRegion.imageSubresource.baseArrayLayer = 0;
-      copyRegion.imageSubresource.layerCount = 1;
-      copyRegion.imageExtent =
-          VkExtent3D{static_cast<uint32_t>(pair.first->texture.width),
-                     static_cast<uint32_t>(pair.first->texture.height), 1};
-
-      vkCmdCopyBufferToImage(_submit_buffer.buffer, staging_buffer.buffer,
-                             pair.first->texture.image_allocation.image,
-                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
-                             &copyRegion);
-
-      VkImageMemoryBarrier barrier_info2 = {};
-      barrier_info2.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-      barrier_info2.image = pair.first->texture.image_allocation.image;
-      barrier_info2.subresourceRange = range;
-
-      barrier_info2.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-      barrier_info2.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-      barrier_info2.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-      barrier_info2.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-      vkCmdPipelineBarrier(_submit_buffer.buffer,
-                           VK_PIPELINE_STAGE_TRANSFER_BIT,
-                           VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr,
-                           0, nullptr, 1, &barrier_info2);
-      end_one_time_submit();
-
-      staging_buffer.destroy(); // We don't need the staging buffer anymore
+      init_material(*pair.first);
     }
   }
   return true;
+}
+
+void Renderer::init_material(Material &material) {
+  material.init(_device, _allocator, _descriptor_pool, _deallocator);
+  material.build_pipeline(_device, _render_pass, _window_dims, _deallocator);
+  if (material.texture.valid) {
+    transfer_texture_to_gpu(material.texture);
+  }
+}
+
+void Renderer::transfer_texture_to_gpu(Texture &texture) {
+  // Create a cpu side buffer for the texture
+  // Create a cpu side buffer for the texture
+  BufferAllocation staging_buffer = BufferAllocation::create(
+      texture.get_pixels_size(), VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+      VMA_MEMORY_USAGE_CPU_TO_GPU, _allocator);
+
+  staging_buffer.copy_from((void *)texture.get_pixels(),
+                           texture.get_pixels_size());
+
+  // Change the layout of the texture to be linear as the staging buffer
+  VkImageSubresourceRange range;
+  range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  range.baseMipLevel = 0;
+  range.levelCount = 1;
+  range.baseArrayLayer = 0;
+  range.layerCount = 1;
+
+  begin_one_time_submit();
+  VkImageMemoryBarrier barrier_info = {};
+  barrier_info.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  barrier_info.image = texture.image_allocation.image;
+  barrier_info.subresourceRange = range;
+
+  barrier_info.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  barrier_info.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+
+  barrier_info.srcAccessMask = 0;
+  barrier_info.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+  vkCmdPipelineBarrier(_submit_buffer.buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                       VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                       nullptr, 1, &barrier_info);
+  // Copy the staging buffer to the image
+  VkBufferImageCopy copyRegion = {};
+  copyRegion.bufferOffset = 0;
+  copyRegion.bufferRowLength = 0;
+  copyRegion.bufferImageHeight = 0;
+
+  copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  copyRegion.imageSubresource.mipLevel = 0;
+  copyRegion.imageSubresource.baseArrayLayer = 0;
+  copyRegion.imageSubresource.layerCount = 1;
+  copyRegion.imageExtent = VkExtent3D{static_cast<uint32_t>(texture.width),
+                                      static_cast<uint32_t>(texture.height), 1};
+
+  vkCmdCopyBufferToImage(_submit_buffer.buffer, staging_buffer.buffer,
+                         texture.image_allocation.image,
+                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+
+  VkImageMemoryBarrier barrier_info2 = {};
+  barrier_info2.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  barrier_info2.image = texture.image_allocation.image;
+  barrier_info2.subresourceRange = range;
+
+  barrier_info2.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+  barrier_info2.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  barrier_info2.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  barrier_info2.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+  vkCmdPipelineBarrier(_submit_buffer.buffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                       VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0,
+                       nullptr, 1, &barrier_info2);
+  end_one_time_submit();
+
+  staging_buffer.destroy(); // We don't need the staging buffer anymore
 }
 
 bool Renderer::draw() {
@@ -599,6 +622,7 @@ bool Renderer::draw() {
                               material->ds_allocator.descriptor_sets.size(),
                               material->ds_allocator.descriptor_sets.data(), 0,
                               nullptr);
+
       void *datas[3] = {view.data(), projection.data(),
                         camera->position.data()};
       size_t sizes[3] = {sizeof(float) * view.size(),
@@ -616,12 +640,26 @@ bool Renderer::draw() {
 
       Eigen::Matrix4f model = p_renderable->object.get_model_matrix();
 
-      Material::PushConstants constants;
+      PushConstants constants;
       memcpy(constants.model, model.data(), sizeof(float) * model.size());
       vkCmdPushConstants(_cmd_buffer, material->pipeline_layout,
                          VK_SHADER_STAGE_VERTEX_BIT, 0, 16 * sizeof(float),
                          &constants);
       vkCmdDraw(_cmd_buffer, p_renderable->p_mesh->vertex_count(), 1, 0, 0);
+
+      //  vkCmdBindPipeline(_cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+      //                    debug_renderable.material.pipeline);
+      //  VkDeviceSize offset = 0;
+      //  vkCmdBindVertexBuffers(_cmd_buffer, 0, 1,
+      //                         &debug_renderable.buffer.buffer, &offset);
+      //  Eigen::Matrix4f model;
+      //  model.setIdentity();
+      //  PushConstants constants;
+      //  memcpy(constants.model, model.data(), sizeof(float) * model.size());
+      //  vkCmdPushConstants(
+      //      _cmd_buffer, debug_renderable.material.pipeline_layout,
+      //      VK_SHADER_STAGE_VERTEX_BIT, 0, 16 * sizeof(float), &constants);
+      //  vkCmdDraw(_cmd_buffer, 6, 1, 0, 0);
     }
   }
 

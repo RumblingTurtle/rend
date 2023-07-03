@@ -29,4 +29,8 @@ public:
   int vertex_count();
   bool generate_allocation_buffer(VmaAllocator &allocator,
                                   Deallocator &deallocator_queue);
+
+  Eigen::Vector3f get_vertex_pos(int idx) {
+    return Eigen::Vector3f::Map(_vertices.data() + 8 * idx);
+  }
 };

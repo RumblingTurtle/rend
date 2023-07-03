@@ -14,21 +14,16 @@ struct Binding {
 };
 
 struct DescriptorSetAssembler {
-  VkDescriptorSetLayout descriptor_set_layout;
-  std::vector<VkDescriptorSetLayoutBinding> descriptor_set_layout_bindings;
-
-  std::vector<VkDescriptorSet> descriptor_set;
+  VkDescriptorSetLayout descriptor_set_layout = VK_NULL_HANDLE;
   std::vector<Binding> bindings;
-
   VkDevice device;
 
-  DescriptorSetAssembler(std::vector<Binding> bindings) : bindings(bindings) {}
-
-  void push_descriptor(Binding binding) { bindings.push_back(binding); }
-
   // Creates a set with N bindings
-  bool assemble_layout(VkDevice device) { // Move assembled descriptors into the
+  bool assemble_layout(std::vector<Binding> &bindings,
+                       VkDevice device) { // Move assembled descriptors into the
                                           // descriptor set
+    std::vector<VkDescriptorSetLayoutBinding> descriptor_set_layout_bindings;
+    this->bindings = bindings;
     this->device = device;
     for (int b_idx = 0; b_idx < bindings.size(); b_idx++) {
       VkDescriptorSetLayoutBinding descriptor_set_layout_binding = {};
@@ -65,33 +60,29 @@ struct DescriptorSetAllocator {
   std::vector<DescriptorSetAssembler> assemblers;
   VkDevice device;
 
-public:
   std::vector<VkDescriptorSetLayout> layouts;
   std::vector<VkDescriptorSet> descriptor_sets;
 
-  bool assemble_layouts(std::vector<std::vector<Binding>> bindings,
-                        VkDevice device) {
+  void init(std::vector<std::vector<Binding>> &bindings, VkDevice device,
+            VkDescriptorPool descriptor_pool) {
     this->device = device;
-    for (std::vector<Binding> &b : bindings) {
-      assemblers.emplace_back(b);
-      assemblers.back().assemble_layout(device);
-      layouts.push_back(assemblers.back().descriptor_set_layout);
+    assemblers.resize(bindings.size());
+    layouts.resize(bindings.size(), VK_NULL_HANDLE);
+    descriptor_sets.resize(bindings.size(), VK_NULL_HANDLE);
+    for (int set_idx = 0; set_idx < bindings.size(); set_idx++) {
+      assemblers[set_idx].assemble_layout(bindings[set_idx], device);
+      layouts[set_idx] = assemblers[set_idx].descriptor_set_layout;
     }
-    descriptor_sets.resize(assemblers.size());
-    return true;
-  }
-
-  bool allocate_descriptor_sets(VkDescriptorPool descriptor_pool) {
     VkDescriptorSetAllocateInfo alloc_info = {};
     alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     alloc_info.pNext = nullptr;
     alloc_info.descriptorPool = descriptor_pool;
     alloc_info.descriptorSetCount = layouts.size();
     alloc_info.pSetLayouts = layouts.data();
-
-    descriptor_sets.resize(layouts.size());
-    return vkAllocateDescriptorSets(device, &alloc_info,
-                                    descriptor_sets.data()) == VK_SUCCESS;
+    if (vkAllocateDescriptorSets(device, &alloc_info, descriptor_sets.data()) !=
+        VK_SUCCESS) {
+      throw std::runtime_error("Failed to allocate descriptor sets");
+    }
   }
 
   void bind_buffer(int set_idx, int binding_idx, BufferAllocation &allocation) {
