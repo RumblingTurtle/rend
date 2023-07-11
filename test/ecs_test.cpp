@@ -1,7 +1,7 @@
 #include <Eigen/Dense>
 #include <gtest/gtest.h>
 #include <rend/EntityRegistry.h>
-#include <rend/Object.h>
+#include <rend/Transform.h>
 
 namespace {
 class RegisterComponent : public ::testing::Test {
@@ -10,7 +10,7 @@ protected:
 
   void SetUp() override {
     registry = &ECS::EntityRegistry::get_entity_registry();
-    registry->register_component<Object>();
+    registry->register_component<Transform>();
   }
 };
 
@@ -30,7 +30,7 @@ protected:
   ECS::EID eid;
   void SetUp() override {
     registry = &ECS::EntityRegistry::get_entity_registry();
-    registry->register_component<Object>();
+    registry->register_component<Transform>();
     eid = registry->register_entity();
   }
 };
@@ -40,14 +40,14 @@ TEST_F(RegisterEntity, EnabledFlagActiveTest) {
 }
 
 TEST_F(RegisterEntity, ComponentEnabledTest) {
-  registry->add_component<Object>(eid);
+  registry->add_component<Transform>(eid);
 
-  ASSERT_TRUE(registry->is_component_enabled<Object>(eid));
+  ASSERT_TRUE(registry->is_component_enabled<Transform>(eid));
 }
 
 TEST_F(RegisterEntity, ComponentInitializedTest) {
-  registry->add_component<Object>(eid);
-  Eigen::Vector3f position = registry->get_component<Object>(eid).position;
+  registry->add_component<Transform>(eid);
+  Eigen::Vector3f position = registry->get_component<Transform>(eid).position;
   ASSERT_TRUE(position.isZero())
       << "Position is not initialized to zero" << position;
 }

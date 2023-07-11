@@ -1,8 +1,33 @@
 #pragma once
 #include <SDL2/SDL.h>
 #include <rend/TimeUtils.h>
+#include <unordered_map>
 
-enum KeyCode { M_LEFT, M_RIGHT, SPACE, ESC, ENTER, W, A, S, D, KEY_CODE_COUNT };
+enum KeyCode {
+  M_LEFT,
+  M_RIGHT,
+  SPACE,
+  ESC,
+  ENTER,
+  W,
+  A,
+  S,
+  D,
+  R,
+  KEY_CODE_COUNT
+};
+
+static std::unordered_map<int, KeyCode> KEY_MAP = {
+    {SDL_BUTTON_LEFT, KeyCode::M_LEFT},
+    {SDL_BUTTON_RIGHT, KeyCode::M_RIGHT},
+    {SDLK_SPACE, KeyCode::SPACE},
+    {SDLK_ESCAPE, KeyCode::ESC},
+    {SDLK_RETURN, KeyCode::ENTER},
+    {SDLK_w, KeyCode::W},
+    {SDLK_a, KeyCode::A},
+    {SDLK_s, KeyCode::S},
+    {SDLK_d, KeyCode::D},
+    {SDLK_r, KeyCode::R}};
 
 constexpr float HOLD_TIME = 50.0f; // in ms
 struct InputHandler {
@@ -19,7 +44,7 @@ struct InputHandler {
   // Fill active and key_down arrays for this frame
   // Returns false on SDL_QUIT
   bool poll();
-  KeyCode get_KeyCode(SDL_Event &event);
+  KeyCode get_key_code(SDL_Event &event);
 
   InputHandler();
 

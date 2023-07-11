@@ -357,26 +357,29 @@ bool Renderer::init_debug_renderable() {
   init_material(debug_renderable.material);
   _deallocator.push([&] { debug_renderable.buffer.destroy(); });
 
-  memset(_debug_grid_strips, 0, sizeof(_debug_grid_strips));
+  memset(debug_grid_strips, 0, sizeof(debug_grid_strips));
   float step = DEBUG_GRID_SPAN / DEBUG_GRID_STRIP_COUNT;
   float start = -DEBUG_GRID_SPAN / 2;
   for (int i = 0; i < DEBUG_GRID_STRIP_COUNT; i++) {
-    _debug_grid_strips[i * 12 + 0] = -DEBUG_GRID_SPAN;
-    _debug_grid_strips[i * 12 + 1] = 0;
-    _debug_grid_strips[i * 12 + 2] = start + step * i;
+    debug_grid_strips[i * 12 + 0] = -DEBUG_GRID_SPAN;
+    debug_grid_strips[i * 12 + 1] = 0;
+    debug_grid_strips[i * 12 + 2] = start + step * i;
 
-    _debug_grid_strips[i * 12 + 3] = DEBUG_GRID_SPAN;
-    _debug_grid_strips[i * 12 + 4] = 0;
-    _debug_grid_strips[i * 12 + 5] = start + step * i;
+    debug_grid_strips[i * 12 + 3] = DEBUG_GRID_SPAN;
+    debug_grid_strips[i * 12 + 4] = 0;
+    debug_grid_strips[i * 12 + 5] = start + step * i;
 
-    _debug_grid_strips[i * 12 + 6] = start + step * i;
-    _debug_grid_strips[i * 12 + 7] = 0;
-    _debug_grid_strips[i * 12 + 8] = -DEBUG_GRID_SPAN;
+    debug_grid_strips[i * 12 + 6] = start + step * i;
+    debug_grid_strips[i * 12 + 7] = 0;
+    debug_grid_strips[i * 12 + 8] = -DEBUG_GRID_SPAN;
 
-    _debug_grid_strips[i * 12 + 9] = start + step * i;
-    _debug_grid_strips[i * 12 + 10] = 0;
-    _debug_grid_strips[i * 12 + 11] = DEBUG_GRID_SPAN;
+    debug_grid_strips[i * 12 + 9] = start + step * i;
+    debug_grid_strips[i * 12 + 10] = 0;
+    debug_grid_strips[i * 12 + 11] = DEBUG_GRID_SPAN;
   }
+
+  debug_renderable.buffer.copy_from(debug_grid_strips,
+                                    sizeof(debug_grid_strips));
 
   return true;
 }
@@ -667,8 +670,8 @@ bool Renderer::draw() {
       VkDeviceSize offset = 0;
       PushConstants constants;
       Renderable &renderable = renderable_data.first;
-      Object &object =
-          entity_registry.get_component<Object>(renderable_data.second);
+      Transform &object =
+          entity_registry.get_component<Transform>(renderable_data.second);
 
       Eigen::Matrix4f model = object.get_model_matrix();
       memcpy(constants.model, model.data(), sizeof(float) * model.size());
@@ -683,39 +686,19 @@ bool Renderer::draw() {
                            &constants);
         vkCmdDraw(_cmd_buffer, renderable.p_mesh->vertex_count(), 1, 0, 0);
       }
-
-      { // Debug data
-        if (entity_registry.is_component_enabled<AABB>(
-                renderable_data.second)) {
-          Object &object =
-              entity_registry.get_component<Object>(renderable_data.second);
-
-          AABB aabb =
-              entity_registry.get_component<AABB>(renderable_data.second)
-                  .compute_world_frame(object);
-
-          float strips[72];
-          aabb.get_line_strips(strips);
-
-          debug_renderable.buffer.copy_from(strips, sizeof(strips),
-                                            debug_buffer_size);
-          debug_buffer_size += sizeof(strips);
-        }
-      }
     }
   }
 
-  // Debug buffer was altered
-  debug_renderable.buffer.copy_from(
-      _debug_grid_strips, sizeof(_debug_grid_strips), debug_buffer_size);
-  debug_buffer_size += sizeof(_debug_grid_strips);
   VkDeviceSize offset = 0;
-
   vkCmdBindPipeline(_cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                     debug_renderable.material.pipeline);
   vkCmdBindVertexBuffers(_cmd_buffer, 0, 1, &debug_renderable.buffer.buffer,
                          &offset);
-  vkCmdDraw(_cmd_buffer, debug_buffer_size / (sizeof(float) * 3), 1, 0, 0);
+
+  vkCmdDraw(_cmd_buffer,
+            debug_verts_to_draw +
+                sizeof(debug_grid_strips) / (sizeof(float) * 3),
+            1, 0, 0);
 
   end_render_pass();
 

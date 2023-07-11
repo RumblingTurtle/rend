@@ -26,11 +26,19 @@ public:
 
   // Loads a mesh, it's shaders and fills the vertex buffer
   Mesh(Path path);
-  int vertex_count();
+  int vertex_count() const;
   bool generate_allocation_buffer(VmaAllocator &allocator,
                                   Deallocator &deallocator_queue);
 
-  Eigen::Vector3f get_vertex_pos(int idx) {
+  Eigen::Vector3f get_vertex_pos(int idx) const {
     return Eigen::Vector3f::Map(_vertices.data() + 8 * idx);
   }
 };
+
+namespace Primitives {
+inline Mesh::Ptr &get_default_cube_mesh() {
+  static Mesh::Ptr p_cube =
+      std::make_shared<Mesh>(Path{ASSET_DIRECTORY} / Path{"models/cube.obj"});
+  return p_cube;
+}
+} // namespace Primitives

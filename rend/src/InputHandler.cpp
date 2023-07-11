@@ -52,37 +52,18 @@ bool InputHandler::poll() {
   return true;
 }
 
-KeyCode InputHandler::get_KeyCode(SDL_Event &event) {
-  KeyCode KeyCode = KeyCode::KEY_CODE_COUNT;
-  switch (event.key.keysym.sym) {
-  case SDLK_ESCAPE:
-    KeyCode = KeyCode::ESC;
-    break;
-  case SDLK_w:
-    KeyCode = KeyCode::W;
-    break;
-  case SDLK_a:
-    KeyCode = KeyCode::A;
-    break;
-  case SDLK_s:
-    KeyCode = KeyCode::S;
-    break;
-  case SDLK_d:
-    KeyCode = KeyCode::D;
-    break;
-  case SDLK_SPACE:
-    KeyCode = KeyCode::SPACE;
-    break;
-  case SDLK_RETURN:
-    KeyCode = KeyCode::ENTER;
-    break;
+KeyCode InputHandler::get_key_code(SDL_Event &event) {
+  KeyCode key_code = KeyCode::KEY_CODE_COUNT;
+  if (KEY_MAP.find(event.key.keysym.sym) == KEY_MAP.end()) {
+    return KEY_CODE_COUNT;
   }
 
-  return KeyCode;
+  key_code = KEY_MAP[event.key.keysym.sym];
+  return key_code;
 }
 
 void InputHandler::handle_key(SDL_Event &event) {
-  KeyCode KeyCode = get_KeyCode(event);
+  KeyCode KeyCode = get_key_code(event);
   key_pressed[KeyCode] = true;
   key_down[KeyCode] = event.type == SDL_KEYDOWN;
 

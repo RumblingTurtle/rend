@@ -33,7 +33,7 @@ Mesh::Mesh(Path path) {
   }
 }
 
-int Mesh::vertex_count() { return _vertex_count; }
+int Mesh::vertex_count() const { return _vertex_count; }
 
 bool Mesh::generate_allocation_buffer(VmaAllocator &allocator,
                                       Deallocator &deallocator_queue) {

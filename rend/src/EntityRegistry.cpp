@@ -150,8 +150,9 @@ EntityRegistry::EntityRegistry() {
   component_pools.resize(MAX_COMPONENTS);
 }
 
-REGISTER_COMPONENT(Object);
+REGISTER_COMPONENT(Transform);
 REGISTER_COMPONENT(Renderable);
 REGISTER_COMPONENT(AABB);
+REGISTER_COMPONENT(Rigidbody);
 
 } // namespace ECS

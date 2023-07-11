@@ -1,19 +1,25 @@
 #include <rend/Rendering/Vulkan/Renderer.h>
 
-#include <rend/Object.h>
 #include <rend/Rendering/Vulkan/Material.h>
 #include <rend/Rendering/Vulkan/Mesh.h>
 #include <rend/Rendering/Vulkan/Renderable.h>
+#include <rend/Transform.h>
 
 #include <rend/Audio/AudioPlayer.h>
 #include <rend/EntityRegistry.h>
+#include <rend/Physics/PhysicsSystem.h>
+#include <rend/Rendering/Vulkan/DebugBufferFillSystem.h>
+
 #include <rend/InputHandler.h>
 
 #include <rend/TimeUtils.h>
 
 int main() {
-  Renderer renderer{};
+  Renderer &renderer = Renderer::get_renderer();
   AudioPlayer audio_player{};
+  PhysicsSystem physics_system{};
+  DebugBufferFillSystem debug_buffer_fill_system{};
+
   audio_player.load(Path{ASSET_DIRECTORY} / Path{"audio/dingus.mp3"});
   audio_player.loop = true;
 
@@ -24,21 +30,30 @@ int main() {
   InputHandler input_handler;
 
   ECS::EntityRegistry &registry = ECS::EntityRegistry::get_entity_registry();
-  registry.register_component<Object>();
+  registry.register_component<Transform>();
   registry.register_component<Renderable>();
   registry.register_component<AABB>();
+  registry.register_component<Rigidbody>();
 
   ECS::EID dingus1 = registry.register_entity();
   ECS::EID dingus2 = registry.register_entity();
   ECS::EID cube = registry.register_entity();
 
-  Object &dingus1_object = registry.add_component<Object>(dingus1);
-  Object &dingus2_object = registry.add_component<Object>(dingus2);
-  Object &cube_object = registry.add_component<Object>(cube);
+  ECS::EID floor_cube = registry.register_entity();
+
+  Transform &dingus1_transform = registry.add_component<Transform>(dingus1);
+  Transform &dingus2_transform = registry.add_component<Transform>(dingus2);
+  Transform &cube_transform = registry.add_component<Transform>(cube);
+  Transform &floor_transform = registry.add_component<Transform>(floor_cube);
 
   Renderable &dingus1_renderable = registry.add_component<Renderable>(dingus1);
   Renderable &dingus2_renderable = registry.add_component<Renderable>(dingus2);
   Renderable &cube_renderable = registry.add_component<Renderable>(cube);
+  Renderable &floor_renderable = registry.add_component<Renderable>(floor_cube);
+
+  Rigidbody &dingus1_rigidbody = registry.add_component<Rigidbody>(dingus1);
+  Rigidbody &dingus2_rigidbody = registry.add_component<Rigidbody>(dingus2);
+  Rigidbody &floor_rigidbody = registry.add_component<Rigidbody>(floor_cube);
 
   dingus1_renderable.p_mesh =
       std::make_shared<Mesh>(Path{ASSET_DIRECTORY} / Path{"models/dingus.fbx"});
@@ -51,8 +66,7 @@ int main() {
   dingus2_renderable.p_mesh = dingus1_renderable.p_mesh;
   dingus2_renderable.p_material = dingus1_renderable.p_material;
 
-  cube_renderable.p_mesh =
-      std::make_shared<Mesh>(Path{ASSET_DIRECTORY} / Path{"models/cube.obj"});
+  cube_renderable.p_mesh = Primitives::get_default_cube_mesh();
   cube_renderable.p_material = std::make_shared<Material>(
       Path{Path{ASSET_DIRECTORY} / "shaders/bin/light_vert.spv"},
       Path{Path{ASSET_DIRECTORY} / "shaders/bin/light_frag.spv"}, Path{},
@@ -60,23 +74,34 @@ int main() {
                             VK_FORMAT_R32G32B32_SFLOAT,
                             VK_FORMAT_R32G32_SFLOAT});
 
-  dingus1_object.scale = Eigen::Vector3f::Ones() * 0.5f;
-  dingus2_object.scale = Eigen::Vector3f::Ones() * 0.2f;
-  cube_object.scale = Eigen::Vector3f::Ones() * 0.2f;
+  floor_renderable.p_mesh = Primitives::get_default_cube_mesh();
+  floor_renderable.p_material = dingus1_renderable.p_material;
+
+  dingus1_transform.scale = Eigen::Vector3f::Ones() * 0.5f;
+  dingus2_transform.scale = Eigen::Vector3f::Ones() * 0.2f;
+  cube_transform.scale = Eigen::Vector3f::Ones() * 0.2f;
+  floor_transform.scale = Eigen::Vector3f{20.0f, 0.1f, 20.0f};
+
+  floor_transform.position = Eigen::Vector3f{0.0f, -2.0f, 0.0f};
+  floor_rigidbody.static_body = true;
 
   AABB &aabb1 = registry.add_component<AABB>(dingus1);
-  aabb1.compute(*dingus1_renderable.p_mesh, dingus1_object);
+  aabb1 = AABB(*dingus1_renderable.p_mesh);
 
   AABB &aabb2 = registry.add_component<AABB>(dingus2);
-  aabb2.compute(*dingus2_renderable.p_mesh, dingus2_object);
+  aabb2 = AABB(*dingus2_renderable.p_mesh);
 
-  dingus1_object.rotation =
+  AABB &floor_aabb = registry.add_component<AABB>(floor_cube);
+  floor_aabb = AABB(*floor_renderable.p_mesh);
+
+  dingus1_transform.rotation =
       Eigen::Quaternionf{Eigen::AngleAxisf{-M_PI_2, Eigen::Vector3f::UnitX()}};
-  dingus2_object.position = Eigen::Vector3f{0, 12, 0.0f};
+  dingus2_transform.position = Eigen::Vector3f{0, 12, 0.0f};
 
   renderer.load_renderable(dingus1);
   renderer.load_renderable(dingus2);
   renderer.load_renderable(cube);
+  renderer.load_renderable(floor_cube);
 
   audio_player.play();
 
@@ -84,24 +109,31 @@ int main() {
 
   renderer.camera->position = Eigen::Vector3f{0.0f, 10.0f, -20.0f};
   Time::TimePoint t1 = Time::now();
-
+  Time::TimePoint prev_time = t1;
   double cam_pitch = 0, cam_yaw = 0;
   while (input_handler.poll() && renderer.draw()) {
     Time::TimePoint t2 = Time::now();
     float time = Time::time_difference<Time::Seconds>(t2, t1);
+    float dt = Time::time_difference<Time::Seconds>(t2, prev_time);
+    prev_time = t2;
+
+    physics_system.update(dt);
+    debug_buffer_fill_system.update(dt);
 
     renderer.lights[0].position =
         Eigen::Vector3f{10.0f * std::sin(time), 10.0f, 10.0f * std::cos(time)};
-    cube_object.position = renderer.lights[0].position;
+    cube_transform.position = renderer.lights[0].position;
 
-    dingus1_object.position =
-        Eigen::Vector3f{20 * std::cos(time), 0.5f + std::cos(time), 0.0f};
-    dingus1_object.rotation = Eigen::Quaternionf{
-        Eigen::AngleAxisf{2 * time, Eigen::Vector3f::UnitY()} *
-        Eigen::AngleAxisf{-M_PI_2, Eigen::Vector3f::UnitX()}};
-    dingus2_object.rotation = Eigen::Quaternionf{
-        Eigen::AngleAxisf{-3 * time, Eigen::Vector3f::UnitX()} *
-        Eigen::AngleAxisf{M_PI, Eigen::Vector3f::UnitY()}};
+    if (false) {
+      dingus1_transform.position =
+          Eigen::Vector3f{20 * std::cos(time), 0.5f + std::cos(time), 0.0f};
+      dingus1_transform.rotation = Eigen::Quaternionf{
+          Eigen::AngleAxisf{2 * time, Eigen::Vector3f::UnitY()} *
+          Eigen::AngleAxisf{-M_PI_2, Eigen::Vector3f::UnitX()}};
+      dingus2_transform.rotation = Eigen::Quaternionf{
+          Eigen::AngleAxisf{-3 * time, Eigen::Vector3f::UnitX()} *
+          Eigen::AngleAxisf{M_PI, Eigen::Vector3f::UnitY()}};
+    }
 
     renderer.camera->position +=
         input_handler.is_key_held(KeyCode::W) * renderer.camera->forward() +
@@ -117,6 +149,11 @@ int main() {
       renderer.camera->rotation = Eigen::Quaternionf{
           Eigen::AngleAxisf{cam_yaw, Eigen::Vector3f::UnitY()} *
           Eigen::AngleAxisf{cam_pitch, Eigen::Vector3f::UnitX()}};
+    }
+    if (input_handler.is_key_held(KeyCode::R)) {
+      dingus1_transform.position.setZero();
+      dingus2_transform.position.setZero();
+      renderer.lights[0].position.setZero();
     }
   }
 

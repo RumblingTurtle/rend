@@ -12,7 +12,7 @@ class RenderPipelineBuilder {
   VkPipelineVertexInputStateCreateInfo _vertexInputInfo{};
   VkPipelineInputAssemblyStateCreateInfo _inputAssembly{};
   VkPipelineRasterizationStateCreateInfo _rasterizer{};
-  VkPipelineColorBlendAttachmentState _colorBlendAttachment{};
+  VkPipelineColorBlendAttachmentState _color_blend_attachment{};
   VkPipelineMultisampleStateCreateInfo _multisampling{};
   VkPipelineColorBlendStateCreateInfo _colorBlending{};
   VkPipelineViewportStateCreateInfo _viewportState{};
@@ -117,7 +117,7 @@ public:
     _colorBlending.logicOpEnable = VK_FALSE;
     _colorBlending.logicOp = VK_LOGIC_OP_COPY;
     _colorBlending.attachmentCount = 1;
-    _colorBlending.pAttachments = &_colorBlendAttachment;
+    _colorBlending.pAttachments = &_color_blend_attachment;
   }
 
   // Shader inputs for a pipeline
@@ -207,9 +207,16 @@ public:
   }
 
   void set_color_blend_attachment_state() {
-    _colorBlendAttachment.colorWriteMask =
+    _color_blend_attachment.colorWriteMask =
         VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
         VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    _colorBlendAttachment.blendEnable = VK_FALSE;
+    _color_blend_attachment.blendEnable = VK_TRUE;
+
+    _color_blend_attachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+    _color_blend_attachment.dstColorBlendFactor =
+        VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    _color_blend_attachment.colorBlendOp = VK_BLEND_OP_ADD;
+    _color_blend_attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    _color_blend_attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
   }
 };

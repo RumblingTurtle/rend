@@ -2,12 +2,15 @@
 #include <Eigen/Dense>
 
 // Naive implementation of entities
-struct Object {
+struct Transform {
   Eigen::Vector3f position;
   Eigen::Vector3f scale;
   Eigen::Quaternionf rotation;
+  // Pad or add?
 
-  Object() {
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+  Transform() {
     position = Eigen::Vector3f::Zero();
     scale = Eigen::Vector3f::Ones();
     rotation = Eigen::Quaternionf::Identity();
@@ -23,10 +26,9 @@ struct Object {
   // Using quaternions handles basis orthogonality
   Eigen::Vector3f forward() const { return rotation.toRotationMatrix().col(2); }
   Eigen::Vector3f right() const { return rotation.toRotationMatrix().col(0); }
-  Eigen::Vector3f up() const { return rotation.toRotationMatrix().col(1); }
 };
 
-class Camera : public Object {
+struct Camera : public Transform {
   Eigen::Matrix4f _projection;
 
 public:
@@ -53,7 +55,7 @@ public:
     rotation = Eigen::Quaternionf{R};
   }
 
-  Eigen::Matrix4f get_view_matrix() {
+  Eigen::Matrix4f get_view_matrix() const {
     Eigen::Matrix4f view = Eigen::Matrix4f::Identity();
     view.block<3, 3>(0, 0) = rotation.toRotationMatrix();
     // Camera is looking in the negative z direction
@@ -63,5 +65,5 @@ public:
     return view.inverse();
   }
 
-  Eigen::Matrix4f get_projection_matrix() { return _projection; }
+  Eigen::Matrix4f get_projection_matrix() const { return _projection; }
 };

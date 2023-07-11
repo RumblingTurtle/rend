@@ -13,12 +13,12 @@
 #include <vk_mem_alloc.h>
 #include <vulkan/vulkan.h>
 
-#include <rend/Object.h>
 #include <rend/Rendering/Vulkan/Mesh.h>
 #include <rend/Rendering/Vulkan/RenderPipelineBuilder.h>
 #include <rend/Rendering/Vulkan/Renderable.h>
 #include <rend/Rendering/Vulkan/vk_helper_types.h>
 #include <rend/Rendering/Vulkan/vk_struct_init.h>
+#include <rend/Transform.h>
 #include <rend/macros.h>
 
 #include <rend/EntityRegistry.h>
@@ -28,7 +28,6 @@ constexpr int DEBUG_GRID_STRIP_COUNT = 30; // Strips per grid dimension
 constexpr float DEBUG_GRID_SPAN = 500;     // Meters
 
 class Renderer {
-
   VkExtent2D _window_dims{1000, 1000};
   SDL_Window *_window;
   VkInstance _instance;
@@ -85,14 +84,15 @@ class Renderer {
 
   VkDeviceSize min_ubo_alignment;
 
+public:
   struct {
     BufferAllocation buffer;
     Material material;
   } debug_renderable;
 
-  float _debug_grid_strips[DEBUG_GRID_STRIP_COUNT * 12];
+  float debug_grid_strips[DEBUG_GRID_STRIP_COUNT * 12];
+  int debug_verts_to_draw = 0;
 
-public:
   std::unique_ptr<Camera> camera;
   std::vector<LightSource> lights;
 
@@ -151,4 +151,9 @@ public:
   bool draw();
 
   void cleanup();
+
+  static Renderer &get_renderer() {
+    static Renderer renderer{};
+    return renderer;
+  }
 };

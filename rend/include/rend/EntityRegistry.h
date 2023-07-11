@@ -2,6 +2,7 @@
 #pragma once
 #include <any>
 #include <bitset>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <rend/components.h>
@@ -79,6 +80,73 @@ struct EntityRegistry {
     }
   };
   */
+
+  struct ArchetypeIterator
+      : public std::iterator<std::forward_iterator_tag, EID> {
+    std::function<bool(EID)> predicate;
+    EID current_id = 0;
+    std::unordered_set<EID>::iterator registered_iterator;
+
+    ArchetypeIterator(std::function<bool(EID)> predicate) {
+      this->predicate = predicate;
+      registered_iterator = get_entity_registry().registered_entities.begin();
+    }
+
+    template <typename T> static std::function<bool(EID)> get_predicate() {
+      return [](EID id) {
+        EntityRegistry &registry = get_entity_registry();
+        return registry.is_entity_enabled(id) &&
+               registry.is_component_enabled<T>(id);
+      };
+    }
+
+    template <typename T, typename T2>
+    static std::function<bool(EID)> get_predicate() {
+      return [](EID id) {
+        return ArchetypeIterator::get_predicate<T>()(id) &&
+               ArchetypeIterator::get_predicate<T2>()(id);
+      };
+    }
+
+    template <typename T, typename T2, typename T3>
+    static std::function<bool(EID)> get_predicate() {
+      return [](EID id) {
+        return ArchetypeIterator::get_predicate<T>()(id) &&
+               ArchetypeIterator::get_predicate<T2>()(id) &&
+               ArchetypeIterator::get_predicate<T3>()(id);
+      };
+    }
+
+    void find_next() {
+      EntityRegistry &registry = get_entity_registry();
+      while (registered_iterator != registry.registered_entities.end()) {
+        current_id = *registered_iterator;
+        registered_iterator++;
+        if (predicate(current_id)) {
+          return;
+        }
+      }
+      current_id = MAX_ENTITIES;
+    }
+
+    EID operator==(const ArchetypeIterator &other) {
+      return current_id == other.current_id;
+    }
+
+    EID operator*() { return current_id; }
+    ArchetypeIterator &operator++() {
+      find_next();
+      return *this;
+    }
+
+    bool valid() { return current_id != ECS::MAX_ENTITIES; }
+  };
+
+  template <typename T, typename... Args>
+  ArchetypeIterator archetype_iterator() {
+    return ArchetypeIterator(ArchetypeIterator::get_predicate<T, Args...>());
+  }
+
 private:
   EntityRegistry();
   EntityRegistry(const EntityRegistry &) = delete;
