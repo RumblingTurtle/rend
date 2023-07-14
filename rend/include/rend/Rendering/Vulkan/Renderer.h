@@ -25,7 +25,7 @@
 
 namespace rend {
 class Renderer {
-  static constexpr int MAX_DEBUG_VERTICES = 500;
+  static constexpr int MAX_DEBUG_VERTICES = 100000;
 
   VkExtent2D _window_dims{1000, 1000};
   SDL_Window *_window;
@@ -163,6 +163,12 @@ public:
 
   void draw_debug_quad(const Eigen::Matrix<float, 4, 3> &quad_verts,
                        const Eigen::Vector3f &color);
+
+  void draw_debug_box(const Eigen::Matrix<float, 8, 4> &box_verts,
+                      const Eigen::Vector3f &color);
+
+  void draw_debug_sphere(const Eigen::Vector3f &position, float radius,
+                         int resolution, const Eigen::Vector3f &color);
 };
 
 static Renderer &get_renderer() {

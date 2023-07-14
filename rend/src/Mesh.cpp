@@ -2,9 +2,12 @@
 
 Mesh::Mesh(Path path) {
   if (path.native().size() == 0) {
-
     throw std::runtime_error("Mesh path is empty");
   }
+  if (!std::filesystem::exists(path.native())) {
+    throw std::runtime_error("Mesh path does not exist");
+  }
+
   _mesh_path = path;
 
   Assimp::Importer importer;

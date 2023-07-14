@@ -18,7 +18,6 @@
 #include <Jolt/RegisterTypes.h>
 
 enum BodyType { STATIC, DYNAMIC };
-enum PrimitiveType { BOX, CAPSULE, SPHERE, CYLINDER };
 
 namespace JPH {
 namespace Layers {
@@ -165,17 +164,18 @@ struct PhysicsSystemInterface {
 
   PhysicsSystemInterface(const PhysicsSystemInterface &) = delete;
 
-  void add_body(const Transform &transform, Rigidbody &rigidbody,
-                const Eigen::Vector3f &size, PrimitiveType primitive,
-                float mass, bool static_body) {
+  void add_body(const Transform &transform, Rigidbody &rigidbody, float mass,
+                bool static_body) {
     BodyInterface &body_interface = jph_physics_system->GetBodyInterface();
 
     ShapeSettings::ShapeResult body_shape_result;
-    if (primitive == SPHERE) {
-      SphereShapeSettings body_settings{size[0]};
+    if (rigidbody.primitive_type == Rigidbody::PrimitiveType::SPHERE) {
+      SphereShapeSettings body_settings{rigidbody.dimensions[0]};
       body_shape_result = body_settings.Create();
-    } else if (primitive == BOX) {
-      BoxShapeSettings body_settings{Vec3(size[0], size[1], size[2])};
+    } else if (rigidbody.primitive_type == Rigidbody::PrimitiveType::BOX) {
+      BoxShapeSettings body_settings{Vec3(rigidbody.dimensions[0],
+                                          rigidbody.dimensions[1],
+                                          rigidbody.dimensions[2])};
       body_shape_result = body_settings.Create();
     }
 
@@ -267,17 +267,12 @@ struct PhysicsSystem : public System {
         get_jph_physics_interface();
 
     for (rend::ECS::EntityRegistry::ArchetypeIterator rb_iterator =
-             registry.archetype_iterator<Rigidbody, Transform, AABB>();
+             registry.archetype_iterator<Rigidbody, Transform>();
          rb_iterator.valid(); ++rb_iterator) {
       rend::ECS::EID eid = *rb_iterator;
       Rigidbody &rb = registry.get_component<Rigidbody>(eid);
       Transform &transform = registry.get_component<Transform>(eid);
-      AABB &aabb = registry.get_component<AABB>(eid);
-
-      Eigen::Vector3f box_size =
-          transform.scale.cwiseProduct(aabb.max_local - aabb.min_local) / 2;
-      physics_interface.add_body(transform, rb, box_size, BOX, rb.mass,
-                                 rb.static_body);
+      physics_interface.add_body(transform, rb, rb.mass, rb.static_body);
     }
   }
 
@@ -291,23 +286,26 @@ struct PhysicsSystem : public System {
     physics_interface.update(dt);
     // Update transforms
     for (rend::ECS::EntityRegistry::ArchetypeIterator rb_iterator =
-             registry.archetype_iterator<Rigidbody, Transform, AABB>();
+             registry.archetype_iterator<Rigidbody, Transform>();
          rb_iterator.valid(); ++rb_iterator) {
 
       rend::ECS::EID eid = *rb_iterator;
       Rigidbody &rb = registry.get_component<Rigidbody>(eid);
       Transform &transform = registry.get_component<Transform>(eid);
-      AABB &aabb = registry.get_component<AABB>(eid);
 
-      { // Update global frame AABBs
-        Eigen::Matrix<float, 8, 4> vertices =
-            (transform.get_model_matrix() *
-             get_local_aabb_vertices(aabb).transpose())
-                .transpose();
-        std::pair<Eigen::Vector3f, Eigen::Vector3f> span =
-            compute_span(vertices.block<8, 3>(0, 0));
-        aabb.min_global = span.first;
-        aabb.max_global = span.second;
+      if (registry.is_component_enabled<AABB>(eid)) {
+        AABB &aabb = registry.get_component<AABB>(eid);
+
+        { // Update global frame AABBs
+          Eigen::Matrix<float, 8, 4> vertices =
+              (transform.get_model_matrix() *
+               get_local_aabb_vertices(aabb).transpose())
+                  .transpose();
+          std::pair<Eigen::Vector3f, Eigen::Vector3f> span =
+              compute_span(vertices.block<8, 3>(0, 0));
+          aabb.min_global = span.first;
+          aabb.max_global = span.second;
+        }
       }
 
       transform.position = physics_interface.get_body_position(rb.body_id);

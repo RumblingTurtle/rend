@@ -30,24 +30,24 @@ vec3 calculate_light_contrib(vec3 light_position, vec4 light_color,
     return vec3(0);
   }
 
-  float distance = length(light_position - fragPosWorld.xyz);
+  vec3 light_to_frag = light_position - fragPosWorld.xyz;
+  vec3 light_to_frag_dir = normalize(light_to_frag);
+  float distance = length(light_to_frag);
 
-  vec3 light_to_frag = normalize(light_position - fragPosWorld.xyz);
-
-  float diffuse_intensity = max(dot(fragNormalWorld.xyz, light_to_frag), 0.0);
+  float diffuse_intensity =
+      max(dot(fragNormalWorld.xyz, light_to_frag_dir), 0.0);
   vec3 diffuse = diffuse_intensity * light_color.xyz;
 
-  vec3 reflected_dir = reflect(light_to_frag, fragNormalWorld.xyz);
+  vec3 reflected_dir = reflect(light_to_frag_dir, fragNormalWorld.xyz);
   float spec = pow(max(dot(view_dir, reflected_dir), 0.0), 32);
   vec3 specular = 0.5f * spec * light_color.xyz;
 
   float attenuation =
-      1.0 / (1.0f + 0.007 * distance + 0.0002 * (distance * distance));
+      1.0 / (1.0f + 0.007 * distance + 0.001 * (distance * distance));
 
-  vec3 ambient = vec3(0.05f, 0.05f, 0.05f);
+  vec3 ambient = vec3(0.001f, 0.001f, 0.001f);
 
-  return (ambient * attenuation + diffuse * attenuation +
-          specular * attenuation);
+  return (ambient + diffuse * attenuation + specular * attenuation);
 }
 
 void main() {

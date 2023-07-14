@@ -366,6 +366,9 @@ bool Renderer::init_debug_renderable() {
 void Renderer::draw_debug_line(const Eigen::Vector3f &start,
                                const Eigen::Vector3f &end,
                                const Eigen::Vector3f &color) {
+  if (MAX_DEBUG_VERTICES <= debug_renderable.debug_verts_to_draw * 2) {
+    throw std::runtime_error("Debug buffer overflow");
+  }
   // TODO: Replace with vert incices
   int start_offset = debug_renderable.debug_verts_to_draw * 6;
   memcpy(debug_renderable.debug_buffer + start_offset, start.data(),
@@ -384,11 +387,76 @@ void Renderer::draw_debug_quad(const Eigen::Matrix<float, 4, 3> &quad_verts,
   for (int i = 0; i < 4; i++) {
     draw_debug_line(quad_verts.row(i), quad_verts.row((i + 1) % 4), color);
   }
+}
 
-  draw_debug_line(quad_verts.row(0), quad_verts.row(2), color);
+void Renderer::draw_debug_box(const Eigen::Matrix<float, 8, 4> &box_verts,
+                              const Eigen::Vector3f &color) {
+  /*
+  Vertex order is :
+  0-3 top clockwise
+  4-7 bottom clockwise
+  */
+  for (int edge = 0; edge < 4; edge++) {
+    int b1 = edge % 4;
+    int b2 = (edge + 1) % 4;
+
+    int t1 = 4 + edge % 4;
+    int t2 = 4 + (edge + 1) % 4;
+    /*
+
+              Top strip
+              t1 ---- t2/|
+    Side strip|        | |
+              |        | |
+              b1 ---- b2/
+              Bottom strip
+    */
+    draw_debug_line(box_verts.row(b1).head<3>(), box_verts.row(b2).head<3>(),
+                    color);
+    draw_debug_line(box_verts.row(t1).head<3>(), box_verts.row(t2).head<3>(),
+                    color);
+    draw_debug_line(box_verts.row(t1).head<3>(), box_verts.row(b1).head<3>(),
+                    color);
+  }
+}
+
+void Renderer::draw_debug_sphere(const Eigen::Vector3f &position, float radius,
+                                 int resolution, const Eigen::Vector3f &color) {
+
+  Eigen::MatrixXf sphere_verts(resolution, 3);
+  for (int i = 0; i < resolution; i++) {
+    float theta = i * 2 * M_PI / resolution;
+    sphere_verts.row(i) =
+        Eigen::Vector3f{radius * cos(theta), radius * sin(theta),
+                        0}; // No rotation around Y axis
+  }
+
+  for (int i = 0; i < resolution; i++) {
+    Eigen::Matrix3f rotation =
+        Eigen::AngleAxisf(i * 2 * M_PI / resolution, Eigen::Vector3f::UnitY())
+            .toRotationMatrix();
+
+    Eigen::MatrixXf rotated_verts = rotation * sphere_verts.transpose();
+    for (int i = 0; i < resolution; i++) {
+      draw_debug_line(position + rotated_verts.col(i),
+                      position + rotated_verts.col((i + 1) % resolution),
+                      color);
+    }
+  }
+
+  // Horizontal ring
+  Eigen::Matrix3f rotation =
+      Eigen::AngleAxisf(M_PI_2, Eigen::Vector3f::UnitX()).toRotationMatrix();
+
+  Eigen::MatrixXf rotated_verts = rotation * sphere_verts.transpose();
+  for (int i = 0; i < resolution; i++) {
+    draw_debug_line(position + rotated_verts.col(i),
+                    position + rotated_verts.col((i + 1) % resolution), color);
+  }
 }
 
 bool Renderer::load_renderable(rend::ECS::EID r_id) {
+
   rend::ECS::EntityRegistry &registry = rend::ECS::get_entity_registry();
   if (!registry.is_component_enabled<Renderable>(r_id)) {
     std::cerr << "Entity " << r_id << " does not have a renderable component"
@@ -398,6 +466,11 @@ bool Renderer::load_renderable(rend::ECS::EID r_id) {
 
   Renderable &renderable = registry.get_component<Renderable>(r_id);
   Material *p_material = renderable.p_material.get();
+
+  if (p_material == nullptr) {
+    std::cerr << "Renderer::load_renderable material is null" << std::endl;
+    return false;
+  }
   if (_renderables.find(p_material) == _renderables.end()) {
     _renderables[p_material] =
         std::vector<std::pair<Renderable, rend::ECS::EID>>();
