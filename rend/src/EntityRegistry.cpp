@@ -1,6 +1,6 @@
 #include <rend/EntityRegistry.h>
 
-namespace ECS {
+namespace rend::ECS {
 
 template <typename T> void EntityRegistry::register_component() {
   if (registered_component_count >= MAX_COMPONENTS) {
@@ -140,7 +140,7 @@ template <typename T> T &EntityRegistry::get_component(EID id) {
   return pool->components[id];
 }
 
-EntityRegistry &EntityRegistry::get_entity_registry() {
+EntityRegistry &get_entity_registry() {
   static EntityRegistry registry{};
   return registry;
 };
@@ -150,9 +150,45 @@ EntityRegistry::EntityRegistry() {
   component_pools.resize(MAX_COMPONENTS);
 }
 
+// ArchetypeIterator
+
+EntityRegistry::ArchetypeIterator::ArchetypeIterator(
+    std::function<bool(EID)> predicate) {
+  this->predicate = predicate;
+  registered_iterator = get_entity_registry().registered_entities.begin();
+}
+
+void EntityRegistry::ArchetypeIterator::find_next() {
+  EntityRegistry &registry = get_entity_registry();
+  while (registered_iterator != registry.registered_entities.end()) {
+    current_id = *registered_iterator;
+    registered_iterator++;
+    if (predicate(current_id)) {
+      return;
+    }
+  }
+  current_id = MAX_ENTITIES;
+}
+
+EID EntityRegistry::ArchetypeIterator::operator==(
+    const ArchetypeIterator &other) {
+  return current_id == other.current_id;
+}
+
+EID EntityRegistry::ArchetypeIterator::operator*() { return current_id; }
+EntityRegistry::ArchetypeIterator &
+EntityRegistry::ArchetypeIterator::operator++() {
+  find_next();
+  return *this;
+}
+
+bool EntityRegistry::ArchetypeIterator::valid() {
+  return current_id != rend::ECS::MAX_ENTITIES;
+}
+
 REGISTER_COMPONENT(Transform);
 REGISTER_COMPONENT(Renderable);
 REGISTER_COMPONENT(AABB);
 REGISTER_COMPONENT(Rigidbody);
 
-} // namespace ECS
+} // namespace rend::ECS

@@ -4,6 +4,7 @@
 #include <iostream>
 #include <rend/Rendering/Vulkan/vk_helper_types.h>
 
+namespace rend {
 class AudioPlayer {
   bool _valid;
   Mix_Music *music;
@@ -43,3 +44,4 @@ public:
 
   ~AudioPlayer() { Mix_FreeMusic(music); }
 };
+} // namespace rend

@@ -6,10 +6,10 @@
 namespace {
 class RegisterComponent : public ::testing::Test {
 protected:
-  ECS::EntityRegistry *registry;
+  rend::ECS::EntityRegistry *registry;
 
   void SetUp() override {
-    registry = &ECS::EntityRegistry::get_entity_registry();
+    registry = &rend::ECS::get_entity_registry();
     registry->register_component<Transform>();
   }
 };
@@ -19,17 +19,17 @@ TEST_F(RegisterComponent, CounterTest) {
 }
 
 TEST_F(RegisterComponent, EntityFlagsAllocatedTest) {
-  ASSERT_EQ(registry->component_rows.capacity(), ECS::MAX_COMPONENTS + 1);
+  ASSERT_EQ(registry->component_rows.capacity(), rend::ECS::MAX_COMPONENTS + 1);
 }
 } // namespace
 
 namespace {
 class RegisterEntity : public ::testing::Test {
 protected:
-  ECS::EntityRegistry *registry;
-  ECS::EID eid;
+  rend::ECS::EntityRegistry *registry;
+  rend::ECS::EID eid;
   void SetUp() override {
-    registry = &ECS::EntityRegistry::get_entity_registry();
+    registry = &rend::ECS::get_entity_registry();
     registry->register_component<Transform>();
     eid = registry->register_entity();
   }
@@ -55,7 +55,7 @@ TEST_F(RegisterEntity, ComponentInitializedTest) {
 TEST_F(RegisterEntity, MaxEntityAmountTest) {
   EXPECT_THROW(
       [&]() {
-        for (int i = 0; i < ECS::MAX_ENTITIES; i++) {
+        for (int i = 0; i < rend::ECS::MAX_ENTITIES; i++) {
           registry->register_entity();
         }
       }(),

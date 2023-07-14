@@ -7,3 +7,6 @@
 [submodule "stb"]
 	path = stb
 	url = https://github.com/nothings/stb.git
+[submodule "JoltPhysics"]
+	path = JoltPhysics
+	url = https://github.com/jrouwe/JoltPhysics.git

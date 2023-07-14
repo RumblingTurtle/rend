@@ -1,5 +1,6 @@
 #include <rend/Rendering/Vulkan/Renderer.h>
 
+namespace rend {
 void Renderer::cleanup() {
   if (!_initialized)
     return;
@@ -344,48 +345,51 @@ bool Renderer::init_descriptor_pool() {
 }
 
 bool Renderer::init_debug_renderable() {
-  debug_renderable.buffer =
-      BufferAllocation::create(3 * sizeof(float) * 2 * MAX_DEBUG_STRIPS,
-                               VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                               VMA_MEMORY_USAGE_CPU_TO_GPU, _allocator);
+  debug_renderable.buffer = BufferAllocation::create(
+      3 * sizeof(float) * MAX_DEBUG_VERTICES, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+      VMA_MEMORY_USAGE_CPU_TO_GPU, _allocator);
   debug_renderable.material =
       Material{Path{ASSET_DIRECTORY} / "shaders/bin/debug_vert.spv",
                Path{ASSET_DIRECTORY} / "shaders/bin/debug_frag.spv",
                {},
-               std::vector<VkFormat>{VK_FORMAT_R32G32B32_SFLOAT}};
+               std::vector<VkFormat>{VK_FORMAT_R32G32B32_SFLOAT,   // Position
+                                     VK_FORMAT_R32G32B32_SFLOAT}}; // Color
+
   debug_renderable.material.topology_type = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+
   init_material(debug_renderable.material);
   _deallocator.push([&] { debug_renderable.buffer.destroy(); });
-
-  memset(debug_grid_strips, 0, sizeof(debug_grid_strips));
-  float step = DEBUG_GRID_SPAN / DEBUG_GRID_STRIP_COUNT;
-  float start = -DEBUG_GRID_SPAN / 2;
-  for (int i = 0; i < DEBUG_GRID_STRIP_COUNT; i++) {
-    debug_grid_strips[i * 12 + 0] = -DEBUG_GRID_SPAN;
-    debug_grid_strips[i * 12 + 1] = 0;
-    debug_grid_strips[i * 12 + 2] = start + step * i;
-
-    debug_grid_strips[i * 12 + 3] = DEBUG_GRID_SPAN;
-    debug_grid_strips[i * 12 + 4] = 0;
-    debug_grid_strips[i * 12 + 5] = start + step * i;
-
-    debug_grid_strips[i * 12 + 6] = start + step * i;
-    debug_grid_strips[i * 12 + 7] = 0;
-    debug_grid_strips[i * 12 + 8] = -DEBUG_GRID_SPAN;
-
-    debug_grid_strips[i * 12 + 9] = start + step * i;
-    debug_grid_strips[i * 12 + 10] = 0;
-    debug_grid_strips[i * 12 + 11] = DEBUG_GRID_SPAN;
-  }
-
-  debug_renderable.buffer.copy_from(debug_grid_strips,
-                                    sizeof(debug_grid_strips));
 
   return true;
 }
 
-bool Renderer::load_renderable(ECS::EID r_id) {
-  ECS::EntityRegistry &registry = ECS::EntityRegistry::get_entity_registry();
+void Renderer::draw_debug_line(const Eigen::Vector3f &start,
+                               const Eigen::Vector3f &end,
+                               const Eigen::Vector3f &color) {
+  // TODO: Replace with vert incices
+  int start_offset = debug_renderable.debug_verts_to_draw * 6;
+  memcpy(debug_renderable.debug_buffer + start_offset, start.data(),
+         sizeof(float) * 3);
+  memcpy(debug_renderable.debug_buffer + start_offset + 3, color.data(),
+         sizeof(float) * 3);
+  memcpy(debug_renderable.debug_buffer + start_offset + 6, end.data(),
+         sizeof(float) * 3);
+  memcpy(debug_renderable.debug_buffer + start_offset + 9, color.data(),
+         sizeof(float) * 3);
+  debug_renderable.debug_verts_to_draw += 2;
+}
+
+void Renderer::draw_debug_quad(const Eigen::Matrix<float, 4, 3> &quad_verts,
+                               const Eigen::Vector3f &color) {
+  for (int i = 0; i < 4; i++) {
+    draw_debug_line(quad_verts.row(i), quad_verts.row((i + 1) % 4), color);
+  }
+
+  draw_debug_line(quad_verts.row(0), quad_verts.row(2), color);
+}
+
+bool Renderer::load_renderable(rend::ECS::EID r_id) {
+  rend::ECS::EntityRegistry &registry = rend::ECS::get_entity_registry();
   if (!registry.is_component_enabled<Renderable>(r_id)) {
     std::cerr << "Entity " << r_id << " does not have a renderable component"
               << std::endl;
@@ -395,7 +399,8 @@ bool Renderer::load_renderable(ECS::EID r_id) {
   Renderable &renderable = registry.get_component<Renderable>(r_id);
   Material *p_material = renderable.p_material.get();
   if (_renderables.find(p_material) == _renderables.end()) {
-    _renderables[p_material] = std::vector<std::pair<Renderable, ECS::EID>>();
+    _renderables[p_material] =
+        std::vector<std::pair<Renderable, rend::ECS::EID>>();
   }
   renderable.p_mesh->generate_allocation_buffer(_allocator, _deallocator);
   _renderables[p_material].push_back(std::make_pair(renderable, r_id));
@@ -633,8 +638,7 @@ void Renderer::transfer_texture_to_gpu(Texture &texture) {
 }
 
 bool Renderer::draw() {
-  ECS::EntityRegistry &entity_registry =
-      ECS::EntityRegistry::get_entity_registry();
+  rend::ECS::EntityRegistry &entity_registry = rend::ECS::get_entity_registry();
 
   check_materials();
 
@@ -666,7 +670,7 @@ bool Renderer::draw() {
       material->update_lights(lights);
     }
 
-    for (std::pair<Renderable, ECS::EID> &renderable_data : pair.second) {
+    for (std::pair<Renderable, rend::ECS::EID> &renderable_data : pair.second) {
       VkDeviceSize offset = 0;
       PushConstants constants;
       Renderable &renderable = renderable_data.first;
@@ -689,19 +693,23 @@ bool Renderer::draw() {
     }
   }
 
-  VkDeviceSize offset = 0;
-  vkCmdBindPipeline(_cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                    debug_renderable.material.pipeline);
-  vkCmdBindVertexBuffers(_cmd_buffer, 0, 1, &debug_renderable.buffer.buffer,
-                         &offset);
+  if (debug_renderable.debug_verts_to_draw > 0) {
+    debug_renderable.buffer.copy_from(debug_renderable.debug_buffer,
+                                      debug_renderable.debug_verts_to_draw * 6 *
+                                          sizeof(float));
+    VkDeviceSize offset = 0;
+    vkCmdBindPipeline(_cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      debug_renderable.material.pipeline);
+    vkCmdBindVertexBuffers(_cmd_buffer, 0, 1, &debug_renderable.buffer.buffer,
+                           &offset);
 
-  vkCmdDraw(_cmd_buffer,
-            debug_verts_to_draw +
-                sizeof(debug_grid_strips) / (sizeof(float) * 3),
-            1, 0, 0);
+    vkCmdDraw(_cmd_buffer, debug_renderable.debug_verts_to_draw, 1, 0, 0);
+    debug_renderable.debug_verts_to_draw = 0;
+  }
 
   end_render_pass();
 
   _frame_number++;
   return true;
 }
+} // namespace rend

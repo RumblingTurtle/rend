@@ -13,6 +13,8 @@ struct AABB {
   AABB() {
     min_local.setZero();
     max_local.setZero();
+    min_global.setZero();
+    max_global.setZero();
   }
 
   AABB(const Eigen::Vector3f &min_local, const Eigen::Vector3f &max_local) {
@@ -21,15 +23,24 @@ struct AABB {
   }
 
   AABB(const Mesh &mesh) {
-    // Model space coords
-    for (int v_idx = 0; v_idx < mesh.vertex_count(); v_idx++) {
-      Eigen::Vector3f vertex_pos = mesh.get_vertex_pos(v_idx);
-      for (int i = 0; i < 3; i++) {
-        if (vertex_pos(i) < min_local(i)) {
-          min_local(i) = vertex_pos(i);
-        }
-        if (vertex_pos(i) > max_local(i)) {
-          max_local(i) = vertex_pos(i);
+    min_local.setZero();
+    max_local.setZero();
+    min_global.setZero();
+    max_global.setZero();
+    if (mesh.vertex_count() > 0) {
+      min_local = mesh.get_vertex_pos(0);
+      max_local = mesh.get_vertex_pos(0);
+
+      // Model space coords
+      for (int v_idx = 0; v_idx < mesh.vertex_count(); v_idx++) {
+        Eigen::Vector3f vertex_pos = mesh.get_vertex_pos(v_idx);
+        for (int i = 0; i < 3; i++) {
+          if (vertex_pos(i) < min_local(i)) {
+            min_local(i) = vertex_pos(i);
+          }
+          if (vertex_pos(i) > max_local(i)) {
+            max_local(i) = vertex_pos(i);
+          }
         }
       }
     }
@@ -63,22 +74,24 @@ inline Eigen::Matrix<float, 8, 4> get_global_aabb_vertices(const AABB &aabb) {
   return get_cube_vertices(aabb.min_global, aabb.max_global);
 }
 
-// NOTE: nothing really prevents you from passing
-// in a smaller array so be cautious
+/*
+  Fills in an array of strips that compose an AABB
+
+  Top strip
+  t1 ---- t2/|
+  |        | |Side strip
+  |        | |
+  b1 ---- b2/
+  Bottom strip
+
+  NOTE: nothing really prevents you from passing
+  in a smaller array so be cautious
+*/
 inline void get_line_strips(const AABB &aabb, float strips[72],
                             bool local = false) {
   Eigen::Matrix<float, 8, 4> vertices =
       !local ? get_global_aabb_vertices(aabb) : get_local_aabb_vertices(aabb);
-
   for (int edge = 0; edge < 4; edge++) {
-    /**
-     * Top strip
-     * t1 ---- t2/|
-     * |        | |Side strip
-     * |        | |
-     * b1 ---- b2/
-     * Bottom strip
-     */
     int b1 = edge % 4;
     int b2 = (edge + 1) % 4;
 

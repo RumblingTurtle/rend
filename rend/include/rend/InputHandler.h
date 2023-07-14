@@ -3,6 +3,7 @@
 #include <rend/TimeUtils.h>
 #include <unordered_map>
 
+namespace rend::input {
 enum KeyCode {
   M_LEFT,
   M_RIGHT,
@@ -37,7 +38,7 @@ struct InputHandler {
   bool key_down[KEY_CODE_COUNT];
   float hold_time[KEY_CODE_COUNT]; // in ms
 
-  Time::TimePoint prev_tick;
+  rend::time::TimePoint prev_tick;
   bool first_poll;
   // Relative mouse movement
   int m_dx, m_dy;
@@ -57,3 +58,4 @@ struct InputHandler {
 
   bool is_key_held(KeyCode code) { return hold_time[code] > 0; }
 };
+} // namespace rend::input

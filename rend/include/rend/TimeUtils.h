@@ -1,7 +1,7 @@
 #pragma once
 #include <chrono>
 
-namespace Time {
+namespace rend::time {
 typedef std::chrono::high_resolution_clock::time_point TimePoint;
 
 typedef std::chrono::seconds Seconds;
@@ -22,4 +22,4 @@ template <> inline float time_difference<Seconds>(TimePoint t1, TimePoint t2) {
   return time_difference<Milliseconds>(t1, t2) * 0.001f;
 }
 
-} // namespace Time
+} // namespace rend::time

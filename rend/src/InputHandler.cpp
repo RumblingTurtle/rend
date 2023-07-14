@@ -1,5 +1,6 @@
 #include <rend/InputHandler.h>
 
+namespace rend::input {
 InputHandler::InputHandler() {
   for (int i = 0; i < KEY_CODE_COUNT; i++) {
     hold_time[i] = -HOLD_TIME;
@@ -18,11 +19,12 @@ void InputHandler::reset() {
 bool InputHandler::poll() {
   double dt = 1;
   if (first_poll) {
-    prev_tick = Time::now();
+    prev_tick = rend::time::now();
     first_poll = false;
   } else {
-    Time::TimePoint curr_tick = Time::now();
-    dt = Time::time_difference<Time::Milliseconds>(curr_tick, prev_tick);
+    rend::time::TimePoint curr_tick = rend::time::now();
+    dt = rend::time::time_difference<rend::time::Milliseconds>(curr_tick,
+                                                               prev_tick);
     prev_tick = curr_tick;
   }
 
@@ -99,3 +101,4 @@ void InputHandler::update_hold_time(double dt) {
     }
   }
 }
+} // namespace rend::input

@@ -23,11 +23,10 @@
 
 #include <rend/EntityRegistry.h>
 
-constexpr int MAX_DEBUG_STRIPS = 200;
-constexpr int DEBUG_GRID_STRIP_COUNT = 30; // Strips per grid dimension
-constexpr float DEBUG_GRID_SPAN = 500;     // Meters
-
+namespace rend {
 class Renderer {
+  static constexpr int MAX_DEBUG_VERTICES = 500;
+
   VkExtent2D _window_dims{1000, 1000};
   SDL_Window *_window;
   VkInstance _instance;
@@ -66,7 +65,8 @@ class Renderer {
   // VMA allocator
   VmaAllocator _allocator;
 
-  std::unordered_map<Material *, std::vector<std::pair<Renderable, ECS::EID>>>
+  std::unordered_map<Material *,
+                     std::vector<std::pair<Renderable, rend::ECS::EID>>>
       _renderables;
 
   Deallocator _deallocator;
@@ -85,13 +85,19 @@ class Renderer {
   VkDeviceSize min_ubo_alignment;
 
 public:
+  struct DebugVertex {
+    float start[3];
+    float start_color[3];
+    float end[3];
+    float end_color[3];
+  };
+
   struct {
     BufferAllocation buffer;
     Material material;
+    float debug_buffer[MAX_DEBUG_VERTICES * sizeof(DebugVertex)];
+    int debug_verts_to_draw = 0;
   } debug_renderable;
-
-  float debug_grid_strips[DEBUG_GRID_STRIP_COUNT * 12];
-  int debug_verts_to_draw = 0;
 
   std::unique_ptr<Camera> camera;
   std::vector<LightSource> lights;
@@ -130,7 +136,7 @@ public:
   bool init_debug_renderable();
 
   // Caches enity's renderable component + allocates mesh buffer
-  bool load_renderable(ECS::EID eid);
+  bool load_renderable(rend::ECS::EID eid);
 
   // Starts submission command buffer recording
   bool begin_one_time_submit();
@@ -152,8 +158,15 @@ public:
 
   void cleanup();
 
-  static Renderer &get_renderer() {
-    static Renderer renderer{};
-    return renderer;
-  }
+  void draw_debug_line(const Eigen::Vector3f &start, const Eigen::Vector3f &end,
+                       const Eigen::Vector3f &color);
+
+  void draw_debug_quad(const Eigen::Matrix<float, 4, 3> &quad_verts,
+                       const Eigen::Vector3f &color);
 };
+
+static Renderer &get_renderer() {
+  static Renderer renderer{};
+  return renderer;
+}
+} // namespace rend

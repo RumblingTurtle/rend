@@ -1,24 +1,17 @@
 #pragma once
 #include <Eigen/Dense>
 
+#include <Jolt/Jolt.h>
+
+#include <Jolt/Physics/Body/Body.h>
+
 struct Rigidbody {
-  Eigen::Vector3f linear_velocity;
-  Eigen::Vector3f angular_velocity;
-
-  Eigen::Vector3f linear_acceleration;
-  Eigen::Vector3f angular_acceleration;
-
   float mass;
-  float drag;
+  float damping;
   float gravity;
   bool static_body;
+  JPH::BodyID body_id;
 
-  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-
-  Rigidbody() : mass(1.0f), drag(0.99999f), gravity(9.8f), static_body(false) {
-    linear_velocity.setZero();
-    angular_velocity.setZero();
-    linear_acceleration.setZero();
-    angular_acceleration.setZero();
-  }
+  Rigidbody()
+      : mass(1.0f), damping(0.99999f), gravity(9.8f), static_body(false) {}
 };

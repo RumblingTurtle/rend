@@ -13,6 +13,8 @@ find_package(Eigen3 REQUIRED)
 find_package(SDL2 REQUIRED)
 add_subdirectory(vk-bootstrap)
 add_subdirectory(VulkanMemoryAllocator)
+add_subdirectory(JoltPhysics/Build)
+
 
 # Shader compilation targets
 file(GLOB VERT_SHADER_SOURCES 
@@ -86,6 +88,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PUBLIC
     rend/include/
     vk-bootstrap/src
     stb/
+    JoltPhysics/
 )
 
 target_link_libraries(${CMAKE_PROJECT_NAME}  PUBLIC
@@ -96,6 +99,8 @@ target_link_libraries(${CMAKE_PROJECT_NAME}  PUBLIC
     assimp
     SDL2
     SDL2_mixer
+    Jolt
+    pthread
 )
 
 add_dependencies(${CMAKE_PROJECT_NAME} ${SHADER_TARGETS})
