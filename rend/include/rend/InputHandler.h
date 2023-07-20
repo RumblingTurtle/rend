@@ -15,47 +15,56 @@ enum KeyCode {
   S,
   D,
   R,
+  F,
   KEY_CODE_COUNT
 };
 
-static std::unordered_map<int, KeyCode> KEY_MAP = {
-    {SDL_BUTTON_LEFT, KeyCode::M_LEFT},
-    {SDL_BUTTON_RIGHT, KeyCode::M_RIGHT},
-    {SDLK_SPACE, KeyCode::SPACE},
-    {SDLK_ESCAPE, KeyCode::ESC},
-    {SDLK_RETURN, KeyCode::ENTER},
-    {SDLK_w, KeyCode::W},
-    {SDLK_a, KeyCode::A},
-    {SDLK_s, KeyCode::S},
-    {SDLK_d, KeyCode::D},
-    {SDLK_r, KeyCode::R}};
+static std::unordered_map<SDL_Scancode, KeyCode> SDL_TO_IH_KEYMAP = {
+    {SDL_SCANCODE_SPACE, KeyCode::SPACE},  //
+    {SDL_SCANCODE_ESCAPE, KeyCode::ESC},   //
+    {SDL_SCANCODE_RETURN, KeyCode::ENTER}, //
+    {SDL_SCANCODE_W, KeyCode::W},          //
+    {SDL_SCANCODE_A, KeyCode::A},          //
+    {SDL_SCANCODE_S, KeyCode::S},          //
+    {SDL_SCANCODE_D, KeyCode::D},          //
+    {SDL_SCANCODE_R, KeyCode::R},          //
+    {SDL_SCANCODE_F, KeyCode::F},          //
+};
 
-constexpr float HOLD_TIME = 50.0f; // in ms
+static std::unordered_map<KeyCode, SDL_Scancode> IH_TO_SDL_KEYMAP = []() {
+  std::unordered_map<KeyCode, SDL_Scancode> map;
+  for (auto &pair : SDL_TO_IH_KEYMAP) {
+    map[pair.second] = pair.first;
+  }
+  return map;
+}();
+
 struct InputHandler {
-  bool mouse_moved;
 
   bool key_pressed[KEY_CODE_COUNT];
-  bool key_down[KEY_CODE_COUNT];
+  bool key_held[KEY_CODE_COUNT];
+  bool key_released[KEY_CODE_COUNT];
   float hold_time[KEY_CODE_COUNT]; // in ms
 
-  rend::time::TimePoint prev_tick;
-  bool first_poll;
+  Uint32 last_state[KEY_CODE_COUNT];
+
+  const Uint8 *keyboard_state;
   // Relative mouse movement
   int m_dx, m_dy;
-  // Fill active and key_down arrays for this frame
+  // Fill active and key_held arrays for this frame
   // Returns false on SDL_QUIT
-  bool poll();
-  KeyCode get_key_code(SDL_Event &event);
+  bool poll(float dt);
+
+  KeyCode get_input_handler_key_code(SDL_Scancode code);
+  SDL_Scancode get_sdl_key_code(KeyCode code);
 
   InputHandler();
 
-  void reset();
-  void handle_key(SDL_Event &event);
-  void handle_mouse_button(SDL_Event &event);
-  void handle_mouse_motion(SDL_Event &event);
-
-  void update_hold_time(double dt);
+  void handle_keyboard(float dt);
+  void handle_mouse(float dt);
 
   bool is_key_held(KeyCode code) { return hold_time[code] > 0; }
+  bool is_key_pressed(KeyCode code) { return key_pressed[code]; }
+  bool is_key_released(KeyCode code) { return key_released[code]; }
 };
 } // namespace rend::input

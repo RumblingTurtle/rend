@@ -142,18 +142,26 @@ int main() {
   renderer.lights[0].set_color(Eigen::Vector3f::Ones());
   renderer.camera->position = Eigen::Vector3f{0.0f, 10.0f, -20.0f};
 
+  bool draw_debug = false;
   physics_system.init();
   rend::time::TimePoint t1 = rend::time::now();
   rend::time::TimePoint prev_time = t1;
   double cam_pitch = 0, cam_yaw = 0;
-  while (input_handler.poll() && renderer.draw()) {
+  float dt = 0;
+  while (input_handler.poll(dt)) {
     rend::time::TimePoint t2 = rend::time::now();
     float time = rend::time::time_difference<rend::time::Seconds>(t2, t1);
-    float dt = rend::time::time_difference<rend::time::Seconds>(t2, prev_time);
+    dt = rend::time::time_difference<rend::time::Seconds>(t2, prev_time);
     prev_time = t2;
 
     physics_system.update(dt);
-    debug_buffer_fill_system.update(dt);
+
+    if (draw_debug) {
+      debug_buffer_fill_system.update(dt);
+    }
+    if (input_handler.is_key_pressed(rend::input::KeyCode::F)) {
+      draw_debug = !draw_debug;
+    }
 
     renderer.lights[0].set_position(
         Eigen::Vector3f{10.0f * std::sin(time), 10.0f, 10.0f * std::cos(time)});
@@ -173,15 +181,15 @@ int main() {
         input_handler.is_key_held(rend::input::KeyCode::A) *
             -renderer.camera->right();
 
-    if (input_handler.mouse_moved) {
-      cam_pitch += input_handler.m_dy * 0.01f;
-      cam_yaw += input_handler.m_dx * 0.01f;
-      cam_pitch = CLAMP(cam_pitch, -M_PI_2, M_PI_2);
+    cam_pitch += input_handler.m_dy * 0.01f;
+    cam_yaw += input_handler.m_dx * 0.01f;
+    cam_pitch = CLAMP(cam_pitch, -M_PI_2, M_PI_2);
 
-      renderer.camera->rotation = Eigen::Quaternionf{
-          Eigen::AngleAxisf{cam_yaw, Eigen::Vector3f::UnitY()} *
-          Eigen::AngleAxisf{cam_pitch, Eigen::Vector3f::UnitX()}};
-    }
+    renderer.camera->rotation = Eigen::Quaternionf{
+        Eigen::AngleAxisf{cam_yaw, Eigen::Vector3f::UnitY()} *
+        Eigen::AngleAxisf{cam_pitch, Eigen::Vector3f::UnitX()}};
+
+    renderer.draw();
   }
 
   renderer.cleanup();

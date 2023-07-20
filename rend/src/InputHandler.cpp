@@ -2,103 +2,89 @@
 
 namespace rend::input {
 InputHandler::InputHandler() {
-  for (int i = 0; i < KEY_CODE_COUNT; i++) {
-    hold_time[i] = -HOLD_TIME;
-  }
-  reset();
+  memset(hold_time, 0, sizeof(hold_time));
+  memset(key_pressed, 0, sizeof(key_pressed));
+  memset(key_held, 0, sizeof(key_held));
+  memset(key_released, 0, sizeof(key_released));
+
+  int key_count;
+  keyboard_state = SDL_GetKeyboardState(&key_count);
 }
 
-void InputHandler::reset() {
-  memset(key_pressed, 0, sizeof(key_pressed));
-  memset(key_down, 0, sizeof(key_down));
-  mouse_moved = false;
+bool InputHandler::poll(float dt) {
   m_dx = 0;
   m_dy = 0;
-}
-
-bool InputHandler::poll() {
-  double dt = 1;
-  if (first_poll) {
-    prev_tick = rend::time::now();
-    first_poll = false;
-  } else {
-    rend::time::TimePoint curr_tick = rend::time::now();
-    dt = rend::time::time_difference<rend::time::Milliseconds>(curr_tick,
-                                                               prev_tick);
-    prev_tick = curr_tick;
-  }
-
-  update_hold_time(dt);
 
   SDL_Event event;
-  reset();
   while (SDL_PollEvent(&event)) {
-    // The ESC key registers false positives for some reason
-    if (event.type == SDL_QUIT || hold_time[KeyCode::ESC] > 0) {
+    if (event.type == SDL_QUIT) {
       return false;
     }
+  }
 
-    if (event.type == SDL_KEYDOWN || event.type == SDL_KEYUP) {
-      handle_key(event);
-    }
+  handle_keyboard(dt);
+  handle_mouse(dt);
 
-    if (event.type == SDL_MOUSEMOTION) {
-      handle_mouse_motion(event);
-    }
-
-    if (event.type == SDL_MOUSEBUTTONDOWN || event.type == SDL_MOUSEBUTTONUP) {
-      handle_mouse_button(event);
-    }
+  if (is_key_pressed(KeyCode::ESC)) {
+    return false;
   }
 
   return true;
 }
 
-KeyCode InputHandler::get_key_code(SDL_Event &event) {
-  KeyCode key_code = KeyCode::KEY_CODE_COUNT;
-  if (KEY_MAP.find(event.key.keysym.sym) == KEY_MAP.end()) {
+SDL_Scancode InputHandler::get_sdl_key_code(KeyCode code) {
+  if (IH_TO_SDL_KEYMAP.find(code) == IH_TO_SDL_KEYMAP.end()) {
+    return SDL_SCANCODE_UNKNOWN;
+  }
+  return IH_TO_SDL_KEYMAP[code];
+}
+
+KeyCode InputHandler::get_input_handler_key_code(SDL_Scancode code) {
+  if (SDL_TO_IH_KEYMAP.find(code) == SDL_TO_IH_KEYMAP.end()) {
     return KEY_CODE_COUNT;
   }
-
-  key_code = KEY_MAP[event.key.keysym.sym];
-  return key_code;
+  return SDL_TO_IH_KEYMAP[code];
 }
 
-void InputHandler::handle_key(SDL_Event &event) {
-  KeyCode KeyCode = get_key_code(event);
-  key_pressed[KeyCode] = true;
-  key_down[KeyCode] = event.type == SDL_KEYDOWN;
-
-  // Reset hold flag
-  if (event.type == SDL_KEYUP) {
-    hold_time[KeyCode] = -HOLD_TIME;
-  }
-}
-
-void InputHandler::handle_mouse_motion(SDL_Event &event) {
-  mouse_moved = true;
-  m_dy = event.motion.yrel;
-  m_dx = event.motion.xrel;
-}
-
-void InputHandler::handle_mouse_button(SDL_Event &event) {
-  key_pressed[KeyCode::M_LEFT] = event.button.button == SDL_BUTTON_LEFT;
-  key_pressed[KeyCode::M_RIGHT] = event.button.button == SDL_BUTTON_RIGHT;
-
-  key_down[KeyCode::M_LEFT] = event.type == SDL_MOUSEBUTTONDOWN;
-  key_down[KeyCode::M_RIGHT] = event.type == SDL_MOUSEBUTTONDOWN;
-}
-
-void InputHandler::update_hold_time(double dt) {
+void InputHandler::handle_keyboard(float dt) {
   for (int i = 0; i < KEY_CODE_COUNT; i++) {
-    if (key_down[i]) { // First key press
-      hold_time[i] += dt;
+    KeyCode ih_code = static_cast<KeyCode>(i);
+    SDL_Scancode key_code = get_sdl_key_code(ih_code);
+
+    bool key_down = keyboard_state[key_code];
+
+    key_held[ih_code] = last_state[ih_code] && key_down;
+    key_pressed[ih_code] = !last_state[ih_code] && key_down;
+    key_released[ih_code] = last_state[ih_code] && key_down;
+    last_state[ih_code] = key_down;
+
+    if (key_held[ih_code]) {
+      hold_time[ih_code] += dt;
     } else {
-      // Key is held until KEY_UP is registered
-      if (hold_time[i] > -HOLD_TIME) {
-        hold_time[i] += dt;
-      }
+      hold_time[ih_code] = 0;
     }
   }
 }
+
+void InputHandler::handle_mouse(float dt) {
+
+  SDL_GetRelativeMouseState(&m_dx, &m_dy);
+  Uint32 button = SDL_GetMouseState(NULL, NULL);
+
+  for (KeyCode key_code : {M_LEFT, M_RIGHT}) {
+    bool key_down = key_code == M_LEFT ? button & SDL_BUTTON(SDL_BUTTON_LEFT)
+                                       : button & SDL_BUTTON(SDL_BUTTON_RIGHT);
+    key_pressed[key_code] = !last_state[key_code] && key_down;
+    key_released[key_code] = last_state[key_code] && !key_down;
+    key_held[key_code] = last_state[key_code] && key_down;
+    last_state[key_code] = key_down;
+
+    if (key_held[key_code]) {
+      hold_time[key_code] += dt;
+    } else {
+      hold_time[key_code] = 0;
+    }
+  }
+}
+
 } // namespace rend::input
