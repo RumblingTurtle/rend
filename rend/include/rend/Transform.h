@@ -1,5 +1,6 @@
 #pragma once
 #include <Eigen/Dense>
+#include <rend/math_utils.h>
 
 // Naive implementation of entities
 struct Transform {
@@ -26,26 +27,6 @@ struct Transform {
   // Using quaternions handles basis orthogonality
   Eigen::Vector3f forward() const { return rotation.toRotationMatrix().col(2); }
   Eigen::Vector3f right() const { return rotation.toRotationMatrix().col(0); }
-};
-
-struct Camera : public Transform {
-  Eigen::Matrix4f _projection;
-
-public:
-  Camera(float fov, float aspect, float near, float far) {
-    assert(aspect > 0);
-    assert(far > near);
-    assert(near > 0);
-
-    _projection = Eigen::Matrix4f::Zero();
-    float e = 1 / std::tan(fov / 180 * M_PI_2);
-    _projection(0, 0) = e / aspect;
-    _projection(1, 1) = e;
-    _projection(2, 2) = (far + near) / (near - far);
-    _projection(3, 3) = 0.0;
-    _projection(3, 2) = -1.0;
-    _projection(2, 3) = (2.0 * far * near) / (near - far);
-  }
 
   void lookat(const Eigen::Vector3f &at) {
     Eigen::Matrix3f R;
@@ -64,6 +45,16 @@ public:
     view.block<3, 1>(0, 3) = position.head<3>();
     return view.inverse();
   }
+};
 
-  Eigen::Matrix4f get_projection_matrix() const { return _projection; }
+struct Camera : public Transform {
+  Eigen::Matrix4f projection;
+  float near, far;
+  float fov;
+
+public:
+  Camera(float fov, float aspect, float near, float far)
+      : near(near), far(far), fov(fov) {
+    projection = get_projection_matrix(fov, aspect, near, far);
+  }
 };

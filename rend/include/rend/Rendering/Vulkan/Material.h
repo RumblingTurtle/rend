@@ -12,6 +12,7 @@ constexpr int MAX_LIGHTS = 8;
 
 struct PushConstants {
   float model[16];
+  int texture_idx;
 };
 
 struct CameraInfo {
@@ -20,71 +21,71 @@ struct CameraInfo {
   float position[4];
 };
 
-struct ModelInfo {
-  float model[16];
+constexpr int MAX_TEXTURE_COUNT = 20;
+static BindingMatrix DEFAULT_BINDINGS = {
+    {Binding{VK_SHADER_STAGE_FRAGMENT_BIT,
+             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 0,
+             MAX_TEXTURE_COUNT}}, // Textures
+    {Binding{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, sizeof(CameraInfo), 1},
+     Binding{VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT,
+             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, sizeof(LightSource),
+             MAX_LIGHTS}, // Camera info (view, projection)
+     Binding{VK_SHADER_STAGE_FRAGMENT_BIT,
+             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 0, 1}}}; // Shadow map
+
+static std::vector<VkFormat> DEFAULT_INPUT_LAYOUT = {
+    VK_FORMAT_R32G32B32_SFLOAT, // Position
+    VK_FORMAT_R32G32B32_SFLOAT, // Normal
+    VK_FORMAT_R32G32_SFLOAT};   // UV
+
+struct MaterialSpec {
+  Path vert_shader;
+  Path frag_shader;
+  BindingMatrix bindings = DEFAULT_BINDINGS;
+  VkPrimitiveTopology topology_type = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+  int vertex_stride = -1;
+  std::vector<VkFormat> input_attributes = DEFAULT_INPUT_LAYOUT;
+  VkPushConstantRange push_constants_description{
+      VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, //
+      0,                                                         //
+      sizeof(PushConstants)                                      //
+  };
 };
 
 class Material {
   RenderPipelineBuilder _pipeline_builder{};
-  bool _pipeline_built = false;
-
   VmaAllocator _allocator = VK_NULL_HANDLE;
 
 public:
   typedef std::shared_ptr<Material> Ptr;
+  typedef std::unique_ptr<Material> UPtr;
 
-  VkPrimitiveTopology topology_type = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+  bool initialized = false;
+
+  MaterialSpec spec;
 
   Shader shader;
-  Texture texture;
 
-  VkFilter filter = VK_FILTER_LINEAR;
-  VkSamplerAddressMode address_mode = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-  VkSampler sampler;
-
-  VertexInfoDescription vertex_info_description;
-  VkPushConstantRange push_constants_description;
-
-  VkPipeline pipeline;
   VkPipelineLayout pipeline_layout;
-
-  struct VertexShaderInput {
-    float position[3];
-    float normal[3];
-    float uv[2];
-  };
-
-  struct DebugShaderInput {
-    float position[3];
-  };
-
-  BufferAllocation _camera_buffer;
-  BufferAllocation _light_buffer;
-
   DescriptorSetAllocator ds_allocator;
 
-  Material(Path vert_shader = {}, Path frag_shader = {}, Path texture_path = {},
-           std::vector<VkFormat> in_attributes = {});
+  VkPipeline pipeline;
 
-  std::vector<VkDescriptorSetLayout> &get_descriptor_layouts() {
-    return ds_allocator.layouts;
-  }
+  Material();
 
-  bool bind_allocator(VmaAllocator allocator) {
-    if (allocator == VK_NULL_HANDLE) {
-      return false;
-    }
-    _allocator = allocator;
-    return true;
-  }
+  // Making sure not to share the same allocated resources
+  Material(const Material &other) = delete;
 
-  bool init(VkDevice &device, VmaAllocator &allocator,
-            VkDescriptorPool &descriptor_pool, Deallocator &deallocation_queue);
+  Material(MaterialSpec spec);
 
-  bool update_lights(std::vector<LightSource> &lights);
+  // Initialization
+  bool build(VkDevice &device, VkDescriptorPool &descriptor_pool,
+             VkRenderPass &render_pass, VkExtent2D &window_dims,
+             Deallocator &deallocation_queue);
 
-  bool build_pipeline(VkDevice &device, VkRenderPass &render_pass,
-                      VkExtent2D &window_dims, Deallocator &deallocation_queue);
-
-  bool pipeline_built();
+  // Descriptor binding
+  void bind_descriptor_buffer(int set_idx, int binding_idx,
+                              BufferAllocation &allocation);
+  void bind_descriptor_texture(int set_idx, int binding_idx, Texture &texture);
 };

@@ -8,13 +8,14 @@
 #include <vulkan/vulkan.h>
 
 class RenderPipelineBuilder {
+  VertexInfoDescription _vertex_info_description{};
   std::vector<VkPipelineShaderStageCreateInfo> _shaderStages{};
-  VkPipelineVertexInputStateCreateInfo _vertexInputInfo{};
-  VkPipelineInputAssemblyStateCreateInfo _inputAssembly{};
+  VkPipelineVertexInputStateCreateInfo _vertex_input_info{};
+  VkPipelineInputAssemblyStateCreateInfo _input_assembly{};
   VkPipelineRasterizationStateCreateInfo _rasterizer{};
   VkPipelineColorBlendAttachmentState _color_blend_attachment{};
   VkPipelineMultisampleStateCreateInfo _multisampling{};
-  VkPipelineColorBlendStateCreateInfo _colorBlending{};
+  VkPipelineColorBlendStateCreateInfo _color_blending{};
   VkPipelineViewportStateCreateInfo _viewportState{};
   VkPipelineDepthStencilStateCreateInfo _depth_stencil_create_info{};
   VkPipelineLayoutCreateInfo pipeline_layout_info{};
@@ -27,10 +28,9 @@ public:
                              DescriptorSetAllocator &ds_allocator,
                              VkPipelineLayout &layout_out) {
     pipeline_layout_info = get_pipeline_layout_create_info(ds_allocator);
-    if (push_constant_range.size != 0) {
-      pipeline_layout_info.pPushConstantRanges = &push_constant_range;
-      pipeline_layout_info.pushConstantRangeCount = 1;
-    }
+
+    pipeline_layout_info.pPushConstantRanges = &push_constant_range;
+    pipeline_layout_info.pushConstantRangeCount = 1;
 
     if (vkCreatePipelineLayout(_device, &pipeline_layout_info, nullptr,
                                &layout_out) != VK_SUCCESS) {
@@ -41,12 +41,12 @@ public:
   void build_pipeline(VkDevice &device, VkRenderPass &render_pass,
                       VkExtent2D extent, Shader &shader,
                       VkPipelineLayout &_pipeline_layout,
-                      VertexInfoDescription &vertex_info_description,
-                      VkPipeline &newPipeline, VkPrimitiveTopology topology) {
-
+                      VertexInfoDescription vertex_info_description,
+                      VkPrimitiveTopology topology, VkPipeline &newPipeline) {
+    _vertex_info_description = vertex_info_description;
     _depth_stencil_create_info = vk_struct_init::get_depth_stencil_create_info(
         true, true, VK_COMPARE_OP_LESS_OR_EQUAL);
-    set_vertex_input_state_create_info(vertex_info_description);
+    set_vertex_input_state_create_info();
     set_input_assembly_create_info(topology);
     // Configure the rasterizer to draw filled triangles
     set_rasterization_state_create_info(VK_POLYGON_MODE_FILL);
@@ -66,12 +66,12 @@ public:
     pipelineInfo.pNext = nullptr;
     pipelineInfo.stageCount = _shaderStages.size();
     pipelineInfo.pStages = _shaderStages.data();
-    pipelineInfo.pVertexInputState = &_vertexInputInfo;
-    pipelineInfo.pInputAssemblyState = &_inputAssembly;
+    pipelineInfo.pVertexInputState = &_vertex_input_info;
+    pipelineInfo.pInputAssemblyState = &_input_assembly;
     pipelineInfo.pViewportState = &_viewportState;
     pipelineInfo.pRasterizationState = &_rasterizer;
     pipelineInfo.pMultisampleState = &_multisampling;
-    pipelineInfo.pColorBlendState = &_colorBlending;
+    pipelineInfo.pColorBlendState = &_color_blending;
     pipelineInfo.pDepthStencilState = &_depth_stencil_create_info;
     pipelineInfo.layout = _pipeline_layout;
     pipelineInfo.renderPass = render_pass;
@@ -110,14 +110,14 @@ public:
   void set_color_blending_info() {
     // setup dummy color blending. We aren't using transparent objects yet
     // the blending is just "no blend", but we do write to the color attachment
-    _colorBlending.sType =
+    _color_blending.sType =
         VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    _colorBlending.flags = 0;
-    _colorBlending.pNext = nullptr;
-    _colorBlending.logicOpEnable = VK_FALSE;
-    _colorBlending.logicOp = VK_LOGIC_OP_COPY;
-    _colorBlending.attachmentCount = 1;
-    _colorBlending.pAttachments = &_color_blend_attachment;
+    _color_blending.flags = 0;
+    _color_blending.pNext = nullptr;
+    _color_blending.logicOpEnable = VK_FALSE;
+    _color_blending.logicOp = VK_LOGIC_OP_COPY;
+    _color_blending.attachmentCount = 1;
+    _color_blending.pAttachments = &_color_blend_attachment;
   }
 
   // Shader inputs for a pipeline
@@ -137,33 +137,32 @@ public:
   }
 
   // Vertex buffer and vertex format info
-  void set_vertex_input_state_create_info(
-      VertexInfoDescription &vertex_info_description) {
-    _vertexInputInfo.sType =
+  void set_vertex_input_state_create_info() {
+    _vertex_input_info.sType =
         VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    _vertexInputInfo.pNext = nullptr;
+    _vertex_input_info.pNext = nullptr;
 
-    _vertexInputInfo.vertexBindingDescriptionCount =
-        vertex_info_description.bindings.size();
-    _vertexInputInfo.pVertexBindingDescriptions =
-        vertex_info_description.bindings.data();
+    _vertex_input_info.vertexBindingDescriptionCount =
+        _vertex_info_description.bindings.size();
+    _vertex_input_info.pVertexBindingDescriptions =
+        _vertex_info_description.bindings.data();
 
     // Fill in the vertex attributes optionally provided by the user
-    _vertexInputInfo.vertexAttributeDescriptionCount =
-        vertex_info_description.attributes.size();
-    _vertexInputInfo.pVertexAttributeDescriptions =
-        vertex_info_description.attributes.data();
+    _vertex_input_info.vertexAttributeDescriptionCount =
+        _vertex_info_description.attributes.size();
+    _vertex_input_info.pVertexAttributeDescriptions =
+        _vertex_info_description.attributes.data();
   }
 
   // Drawn topology information
   void set_input_assembly_create_info(VkPrimitiveTopology topology) {
-    _inputAssembly.sType =
+    _input_assembly.sType =
         VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    _inputAssembly.pNext = nullptr;
+    _input_assembly.pNext = nullptr;
 
-    _inputAssembly.topology = topology;
+    _input_assembly.topology = topology;
 
-    _inputAssembly.primitiveRestartEnable = VK_FALSE;
+    _input_assembly.primitiveRestartEnable = VK_FALSE;
   }
 
   void set_rasterization_state_create_info(VkPolygonMode polygonMode) {
@@ -172,18 +171,14 @@ public:
     _rasterizer.flags = 0;
     _rasterizer.pNext = nullptr;
 
-    // Z value of the fragment can be clamped
-    _rasterizer.depthClampEnable = VK_FALSE;
-
-    // Discards all primitives before the rasterization stage leaving only
-    // vertices
     _rasterizer.rasterizerDiscardEnable = VK_FALSE;
 
     _rasterizer.polygonMode = polygonMode;
     _rasterizer.lineWidth = 1.0f;
     _rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
     _rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
-    // Depth values of a fragment can be offset by a constant
+
+    _rasterizer.depthClampEnable = VK_FALSE;
     _rasterizer.depthBiasEnable = VK_FALSE;
     _rasterizer.depthBiasConstantFactor = 0.0f;
     _rasterizer.depthBiasClamp = 0.0f;

@@ -26,7 +26,8 @@ bool Renderer::init() {
   _initialized = init_vulkan() && init_swapchain() && init_z_buffer() &&
                  init_cmd_buffer() && init_renderpass() &&
                  init_framebuffers() && init_sync_primitives() &&
-                 init_descriptor_pool();
+                 init_descriptor_pool() && init_debug_renderable() &&
+                 init_shadow_map() && init_materials();
   return _initialized;
 }
 
@@ -81,6 +82,76 @@ bool Renderer::init_vulkan() {
     vkDestroyInstance(_instance, nullptr);
   });
 
+  // Allocate buffers for the camera and model info and texture
+  // This can be generalized to any number of buffers and descriptor sets
+  // but will do for now
+  _camera_buffer = BufferAllocation::create(
+      sizeof(CameraInfo), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+      VMA_MEMORY_USAGE_CPU_TO_GPU, _allocator);
+  _light_buffer = BufferAllocation::create(
+      sizeof(LightSource) * MAX_LIGHTS, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+      VMA_MEMORY_USAGE_CPU_TO_GPU, _allocator);
+
+  _deallocator.push([&] {
+    _camera_buffer.destroy();
+    _light_buffer.destroy();
+  });
+
+  return true;
+}
+
+bool Renderer::init_materials() {
+  { // Debug
+    MaterialSpec mat_spec{};
+    mat_spec.vert_shader = Path{ASSET_DIRECTORY} / "shaders/bin/debug_vert.spv";
+    mat_spec.frag_shader = Path{ASSET_DIRECTORY} / "shaders/bin/debug_frag.spv";
+    mat_spec.bindings = {
+        {{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, sizeof(CameraInfo), 1}}};
+    mat_spec.topology_type = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+    mat_spec.input_attributes =
+        std::vector<VkFormat>{VK_FORMAT_R32G32B32_SFLOAT,  // Position
+                              VK_FORMAT_R32G32B32_SFLOAT}; // Color
+    debug_material = Material{mat_spec};                   // Color
+    debug_material.build(_device, _descriptor_pool, _render_pass, _window_dims,
+                         _deallocator);
+  }
+
+  { // Lights
+    MaterialSpec mat_spec{};
+    mat_spec.vert_shader = Path{ASSET_DIRECTORY} / "shaders/bin/light_vert.spv";
+    mat_spec.frag_shader = Path{ASSET_DIRECTORY} / "shaders/bin/light_frag.spv";
+    lights_material = Material{mat_spec}; // Color
+    lights_material.build(_device, _descriptor_pool, _render_pass, _window_dims,
+                          _deallocator);
+  }
+
+  { // Geometry
+    MaterialSpec mat_spec{};
+    geometry_material = Material{mat_spec}; // Color
+    geometry_material.build(_device, _descriptor_pool, _render_pass,
+                            _window_dims, _deallocator);
+  }
+
+  { // Shadow pass
+    MaterialSpec mat_spec{};
+    mat_spec.vert_shader =
+        Path{ASSET_DIRECTORY} / "shaders/bin/shadow_map_vert.spv",
+    mat_spec.frag_shader =
+        Path{ASSET_DIRECTORY} / "shaders/bin/shadow_map_frag.spv",
+    mat_spec.input_attributes =
+        std::vector<VkFormat>{VK_FORMAT_R32G32B32_SFLOAT}; // Color
+
+    // Have to set custom stride
+    // in order to be able to use the same input buffer
+    mat_spec.vertex_stride = FORMAT_SIZES[VK_FORMAT_R32G32B32_SFLOAT] +
+                             FORMAT_SIZES[VK_FORMAT_R32G32B32_SFLOAT] +
+                             FORMAT_SIZES[VK_FORMAT_R32G32_SFLOAT];
+
+    shadow_material = Material{mat_spec};
+    shadow_material.build(_device, _descriptor_pool, _shadow_pass.render_pass,
+                          _shadow_pass.size, _deallocator);
+  }
   return true;
 }
 
@@ -106,13 +177,13 @@ bool Renderer::init_swapchain() {
 bool Renderer::init_z_buffer() {
   VkImageCreateInfo image_info = vk_struct_init::get_image_create_info(
       VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-      VkExtent3D{_window_dims.width, _window_dims.height, 1});
+      VkExtent3D{_window_dims.width, _window_dims.height, 1}, VK_IMAGE_TYPE_2D);
 
   VkImageViewCreateInfo image_view_info =
       vk_struct_init::get_image_view_create_info(
-          nullptr, VK_FORMAT_D32_SFLOAT,
-          VK_IMAGE_ASPECT_DEPTH_BIT); // Image arg will be substituted from
-                                      // image_infos image field
+          nullptr, VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT,
+          VK_IMAGE_VIEW_TYPE_2D); // Image arg will be substituted from
+                                  // image_infos image field
 
   VmaAllocationCreateInfo alloc_info = vk_struct_init::get_allocation_info(
       VMA_MEMORY_USAGE_GPU_ONLY, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
@@ -138,25 +209,14 @@ bool Renderer::init_cmd_buffer() {
   VkCommandBufferAllocateInfo cmd_buffer_info =
       vk_struct_init::get_command_buffer_allocate_info(
           _cmd_pool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1);
-  VkCommandBufferAllocateInfo submit_buffer_info =
-      vk_struct_init::get_command_buffer_allocate_info(
-          _submit_buffer.pool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1);
 
-  VK_CHECK(vkAllocateCommandBuffers(_device, &cmd_buffer_info, &_cmd_buffer),
-           "Failed to allocate command buffer");
-  VK_CHECK(vkAllocateCommandBuffers(_device, &submit_buffer_info,
-                                    &_submit_buffer.buffer),
-           "Failed to allocate submit buffer");
+  VK_CHECK(
+      vkAllocateCommandBuffers(_device, &cmd_buffer_info, &_command_buffer),
+      "Failed to allocate command buffer");
 
   _deallocator.push([=] {
     vkDestroyCommandPool(_device, _submit_buffer.pool, nullptr);
     vkDestroyCommandPool(_device, _cmd_pool, nullptr);
-    vkDestroyRenderPass(_device, _render_pass, nullptr);
-    // destroy swapchain resources
-    for (int i = 0; i < _swapchain_image_views.size(); i++) {
-      vkDestroyFramebuffer(_device, _framebuffers[i], nullptr);
-      vkDestroyImageView(_device, _swapchain_image_views[i], nullptr);
-    }
   });
 
   return true;
@@ -251,7 +311,8 @@ bool Renderer::init_renderpass() {
   VK_CHECK(
       vkCreateRenderPass(_device, &render_pass_info, nullptr, &_render_pass),
       "Failed to create renderpass");
-
+  _deallocator.push(
+      [=]() { vkDestroyRenderPass(_device, _render_pass, nullptr); });
   return true;
 }
 
@@ -274,9 +335,12 @@ bool Renderer::init_framebuffers() {
   for (int i = 0; i < swapchain_imagecount; i++) {
     VkImageView attachments[2] = {_swapchain_image_views[i], _depth_image.view};
     fb_info.pAttachments = attachments;
-
     VK_CHECK(vkCreateFramebuffer(_device, &fb_info, nullptr, &_framebuffers[i]),
              "Failed to create framebuffer");
+    _deallocator.push([=] {
+      vkDestroyFramebuffer(_device, _framebuffers[i], nullptr);
+      vkDestroyImageView(_device, _swapchain_image_views[i], nullptr);
+    });
   }
 
   return true;
@@ -320,19 +384,17 @@ bool Renderer::init_sync_primitives() {
 bool Renderer::init_descriptor_pool() {
   VkDescriptorPoolCreateInfo pool_info = {};
 
-  VkDescriptorPoolSize scene = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 20};
+  VkDescriptorPoolSize scene = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 100};
   VkDescriptorPoolSize material = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                                   20};
+                                   100};
 
-  VkDescriptorPoolSize model = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 20};
-
-  VkDescriptorPoolSize pool_sizes[3] = {scene, material, model};
+  VkDescriptorPoolSize pool_sizes[2] = {scene, material};
 
   pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
   pool_info.pNext = nullptr;
   pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-  pool_info.maxSets = 10;
-  pool_info.poolSizeCount = 3;
+  pool_info.maxSets = 20;
+  pool_info.poolSizeCount = sizeof(pool_sizes) / sizeof(VkDescriptorPoolSize);
   pool_info.pPoolSizes = pool_sizes;
   if (vkCreateDescriptorPool(_device, &pool_info, nullptr, &_descriptor_pool) !=
       VK_SUCCESS) {
@@ -348,16 +410,7 @@ bool Renderer::init_debug_renderable() {
   debug_renderable.buffer = BufferAllocation::create(
       3 * sizeof(float) * MAX_DEBUG_VERTICES, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
       VMA_MEMORY_USAGE_CPU_TO_GPU, _allocator);
-  debug_renderable.material =
-      Material{Path{ASSET_DIRECTORY} / "shaders/bin/debug_vert.spv",
-               Path{ASSET_DIRECTORY} / "shaders/bin/debug_frag.spv",
-               {},
-               std::vector<VkFormat>{VK_FORMAT_R32G32B32_SFLOAT,   // Position
-                                     VK_FORMAT_R32G32B32_SFLOAT}}; // Color
 
-  debug_renderable.material.topology_type = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
-
-  init_material(debug_renderable.material);
   _deallocator.push([&] { debug_renderable.buffer.destroy(); });
 
   return true;
@@ -455,47 +508,21 @@ void Renderer::draw_debug_sphere(const Eigen::Vector3f &position, float radius,
   }
 }
 
-bool Renderer::load_renderable(rend::ECS::EID r_id) {
-
-  rend::ECS::EntityRegistry &registry = rend::ECS::get_entity_registry();
-  if (!registry.is_component_enabled<Renderable>(r_id)) {
-    std::cerr << "Entity " << r_id << " does not have a renderable component"
-              << std::endl;
-    return false;
-  }
-
-  Renderable &renderable = registry.get_component<Renderable>(r_id);
-  Material *p_material = renderable.p_material.get();
-
-  if (p_material == nullptr) {
-    std::cerr << "Renderer::load_renderable material is null" << std::endl;
-    return false;
-  }
-  if (_renderables.find(p_material) == _renderables.end()) {
-    _renderables[p_material] =
-        std::vector<std::pair<Renderable, rend::ECS::EID>>();
-  }
-  renderable.p_mesh->generate_allocation_buffer(_allocator, _deallocator);
-  _renderables[p_material].push_back(std::make_pair(renderable, r_id));
-  return true;
-}
-
 bool Renderer::begin_one_time_submit() {
-  VK_CHECK(vkResetCommandBuffer(_submit_buffer.buffer, 0),
+  VK_CHECK(vkResetCommandBuffer(_command_buffer, 0),
            "Failed to reset command buffer");
   VkCommandBufferBeginInfo cmd_buffer_info = {};
   cmd_buffer_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   cmd_buffer_info.pNext = nullptr;
   cmd_buffer_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   vkResetFences(_device, 1, &_submit_buffer.fence);
-  VK_CHECK(vkBeginCommandBuffer(_submit_buffer.buffer, &cmd_buffer_info),
+  VK_CHECK(vkBeginCommandBuffer(_command_buffer, &cmd_buffer_info),
            "Failed to begin command buffer");
   return true;
 }
 
 bool Renderer::end_one_time_submit() {
-  VK_CHECK(vkEndCommandBuffer(_submit_buffer.buffer),
-           "Failed to end command buffer");
+  VK_CHECK(vkEndCommandBuffer(_command_buffer), "Failed to end command buffer");
 
   VkSubmitInfo submit = {};
   submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -505,7 +532,7 @@ bool Renderer::end_one_time_submit() {
   submit.pWaitSemaphores = nullptr;
   submit.pWaitDstStageMask = nullptr;
   submit.commandBufferCount = 1;
-  submit.pCommandBuffers = &_submit_buffer.buffer;
+  submit.pCommandBuffers = &_command_buffer;
   submit.signalSemaphoreCount = 0;
   submit.pSignalSemaphores = nullptr;
 
@@ -516,7 +543,7 @@ bool Renderer::end_one_time_submit() {
   return true;
 }
 
-bool Renderer::begin_render_pass() {
+bool Renderer::begin_command_buffer(VkCommandBuffer &command_buffer) {
   // Wait for the command queue to complete
   VK_CHECK(vkWaitForFences(_device, 1, &_command_complete_fence, VK_TRUE,
                            1000000000),
@@ -529,43 +556,59 @@ bool Renderer::begin_render_pass() {
            "Failed to acquire swapchain image");
 
   // Fill command buffer
-  VK_CHECK(vkResetCommandBuffer(_cmd_buffer, 0),
+  VK_CHECK(vkResetCommandBuffer(command_buffer, 0),
            "Failed to reset command buffer");
 
   VkCommandBufferBeginInfo cmd_buffer_info = {};
   cmd_buffer_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   cmd_buffer_info.pNext = nullptr;
   cmd_buffer_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  VK_CHECK(vkBeginCommandBuffer(_cmd_buffer, &cmd_buffer_info),
+  VK_CHECK(vkBeginCommandBuffer(command_buffer, &cmd_buffer_info),
            "Failed to begin command buffer");
 
-  VkRenderPassBeginInfo rp_info = {};
-  rp_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-  rp_info.pNext = nullptr;
-
-  rp_info.renderPass = _render_pass;
-  rp_info.renderArea.offset.x = 0;
-  rp_info.renderArea.offset.y = 0;
-  rp_info.renderArea.extent = _window_dims;
-  rp_info.framebuffer = _framebuffers[_swapchain_img_idx];
-
-  VkClearValue clear_value;
-  VkClearValue depth_clear;
-  clear_value.color = {{0.2f, 0.2f, 0.2, 1.0f}};
-  depth_clear.depthStencil.depth = 1.f;
-
-  VkClearValue clear_values[2] = {clear_value, depth_clear};
-  rp_info.clearValueCount = 2;
-  rp_info.pClearValues = clear_values;
-
-  vkCmdBeginRenderPass(_cmd_buffer, &rp_info, VK_SUBPASS_CONTENTS_INLINE);
   return true;
 }
 
-bool Renderer::end_render_pass() {
-  vkCmdEndRenderPass(_cmd_buffer);
+bool Renderer::begin_render_pass(VkRenderPass &render_pass,
+                                 VkFramebuffer &framebuffer,
+                                 VkCommandBuffer &command_buffer,
+                                 VkExtent2D &extent, float depth_clear_value,
+                                 float color_clear_value) {
+  std::vector<VkClearValue> clear_values;
+  if (color_clear_value > 0.0f) {
+    VkClearValue clear_value{};
+    clear_value.color = {
+        {color_clear_value, color_clear_value, color_clear_value, 1.0f}};
+    clear_values.push_back(clear_value);
+  }
 
-  VK_CHECK(vkEndCommandBuffer(_cmd_buffer), "Failed to end command buffer");
+  if (depth_clear_value > 0.0f) {
+    VkClearValue depth_clear{};
+    depth_clear.depthStencil = {depth_clear_value, 0};
+    clear_values.push_back(depth_clear);
+  }
+
+  VkRenderPassBeginInfo rp_info = {};
+  rp_info.clearValueCount = clear_values.size();
+  rp_info.pClearValues = clear_values.data();
+
+  rp_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+  rp_info.pNext = nullptr;
+
+  rp_info.renderPass = render_pass;
+  rp_info.renderArea.extent = extent;
+  rp_info.framebuffer = framebuffer;
+
+  vkCmdBeginRenderPass(command_buffer, &rp_info, VK_SUBPASS_CONTENTS_INLINE);
+  return true;
+}
+
+void Renderer::end_render_pass(VkCommandBuffer &command_buffer) {
+  vkCmdEndRenderPass(command_buffer);
+}
+
+bool Renderer::submit_command_buffer(VkCommandBuffer &command_buffer) {
+  VK_CHECK(vkEndCommandBuffer(_command_buffer), "Failed to end command buffer");
 
   // Submit command to the render queue
   VkSubmitInfo submit = {};
@@ -575,7 +618,7 @@ bool Renderer::end_render_pass() {
   submit.pWaitSemaphores = nullptr;
   submit.pWaitDstStageMask = nullptr;
   submit.commandBufferCount = 1;
-  submit.pCommandBuffers = &_cmd_buffer;
+  submit.pCommandBuffers = &_command_buffer;
   submit.signalSemaphoreCount = 0;
   submit.pSignalSemaphores = nullptr;
 
@@ -594,7 +637,7 @@ bool Renderer::end_render_pass() {
       &_render_complete_semaphore; // Signal render complete
 
   submit.commandBufferCount = 1;
-  submit.pCommandBuffers = &_cmd_buffer;
+  submit.pCommandBuffers = &_command_buffer;
 
   vkResetFences(_device, 1,
                 &_command_complete_fence); // Can be safely reset because we
@@ -620,37 +663,15 @@ bool Renderer::end_render_pass() {
   return true;
 }
 
-// Check if the material has been built, if not build it and send it's texture
-// to GPU
-bool Renderer::check_materials() {
-  if (debug_renderable.buffer.buffer == VK_NULL_HANDLE) {
-    init_debug_renderable();
-  }
-  for (auto &pair : _renderables) {
-    if (!pair.first->pipeline_built()) {
-      init_material(*pair.first);
-    }
-  }
-  return true;
-}
-
-void Renderer::init_material(Material &material) {
-  material.init(_device, _allocator, _descriptor_pool, _deallocator);
-  material.build_pipeline(_device, _render_pass, _window_dims, _deallocator);
-  if (material.texture.valid) {
-    transfer_texture_to_gpu(material.texture);
-  }
-}
-
-void Renderer::transfer_texture_to_gpu(Texture &texture) {
-  // Create a cpu side buffer for the texture
+// Allocate and transfer
+void Renderer::transfer_texture_to_gpu(Texture::Ptr p_texture) {
   // Create a cpu side buffer for the texture
   BufferAllocation staging_buffer = BufferAllocation::create(
-      texture.get_pixels_size(), VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+      p_texture->pixel_buffer.size(), VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
       VMA_MEMORY_USAGE_CPU_TO_GPU, _allocator);
 
-  staging_buffer.copy_from((void *)texture.get_pixels(),
-                           texture.get_pixels_size());
+  staging_buffer.copy_from((void *)p_texture->pixel_buffer.pixels,
+                           p_texture->pixel_buffer.size());
 
   // Change the layout of the texture to be linear as the staging buffer
   VkImageSubresourceRange range;
@@ -663,7 +684,7 @@ void Renderer::transfer_texture_to_gpu(Texture &texture) {
   begin_one_time_submit();
   VkImageMemoryBarrier barrier_info = {};
   barrier_info.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-  barrier_info.image = texture.image_allocation.image;
+  barrier_info.image = p_texture->image_allocation.image;
   barrier_info.subresourceRange = range;
 
   barrier_info.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -672,7 +693,7 @@ void Renderer::transfer_texture_to_gpu(Texture &texture) {
   barrier_info.srcAccessMask = 0;
   barrier_info.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 
-  vkCmdPipelineBarrier(_submit_buffer.buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+  vkCmdPipelineBarrier(_command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                        VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
                        nullptr, 1, &barrier_info);
   // Copy the staging buffer to the image
@@ -680,21 +701,21 @@ void Renderer::transfer_texture_to_gpu(Texture &texture) {
   copyRegion.bufferOffset = 0;
   copyRegion.bufferRowLength = 0;
   copyRegion.bufferImageHeight = 0;
+  copyRegion.imageExtent =
+      VkExtent3D{p_texture->dims.width, p_texture->dims.height, 1};
 
   copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
   copyRegion.imageSubresource.mipLevel = 0;
   copyRegion.imageSubresource.baseArrayLayer = 0;
   copyRegion.imageSubresource.layerCount = 1;
-  copyRegion.imageExtent = VkExtent3D{static_cast<uint32_t>(texture.width),
-                                      static_cast<uint32_t>(texture.height), 1};
 
-  vkCmdCopyBufferToImage(_submit_buffer.buffer, staging_buffer.buffer,
-                         texture.image_allocation.image,
+  vkCmdCopyBufferToImage(_command_buffer, staging_buffer.buffer,
+                         p_texture->image_allocation.image,
                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
 
   VkImageMemoryBarrier barrier_info2 = {};
   barrier_info2.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-  barrier_info2.image = texture.image_allocation.image;
+  barrier_info2.image = p_texture->image_allocation.image;
   barrier_info2.subresourceRange = range;
 
   barrier_info2.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
@@ -702,7 +723,7 @@ void Renderer::transfer_texture_to_gpu(Texture &texture) {
   barrier_info2.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
   barrier_info2.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
-  vkCmdPipelineBarrier(_submit_buffer.buffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+  vkCmdPipelineBarrier(_command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
                        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0,
                        nullptr, 1, &barrier_info2);
   end_one_time_submit();
@@ -710,79 +731,297 @@ void Renderer::transfer_texture_to_gpu(Texture &texture) {
   staging_buffer.destroy(); // We don't need the staging buffer anymore
 }
 
+bool Renderer::init_shadow_map() {
+  VkSamplerCreateInfo sampler_info = vk_struct_init::get_sampler_create_info(
+      VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
+  VK_CHECK(
+      vkCreateSampler(_device, &sampler_info, nullptr, &_shadow_pass.sampler),
+      "Failed to create sampler");
+
+  _deallocator.push(
+      [&] { vkDestroySampler(_device, _shadow_pass.sampler, nullptr); });
+
+  // Allocate shadow mapping images
+  VkImageCreateInfo image_info = vk_struct_init::get_image_create_info(
+      VK_FORMAT_D32_SFLOAT,
+      VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+      VkExtent3D{SHADOW_MAP_RESOLUTION, SHADOW_MAP_RESOLUTION, 1},
+      VK_IMAGE_TYPE_2D);
+
+  VkImageViewCreateInfo image_view_info =
+      vk_struct_init::get_image_view_create_info(nullptr, VK_FORMAT_D32_SFLOAT,
+                                                 VK_IMAGE_ASPECT_DEPTH_BIT,
+                                                 VK_IMAGE_VIEW_TYPE_2D);
+
+  VmaAllocationCreateInfo alloc_info = vk_struct_init::get_allocation_info(
+      VMA_MEMORY_USAGE_GPU_ONLY, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+  _shadow_pass.image_allocation = ImageAllocation::create(
+      image_info, image_view_info, alloc_info, _device, _allocator);
+  _deallocator.push([=] { _shadow_pass.image_allocation.destroy(); });
+
+  // Create renderpass
+  VkAttachmentDescription depth_attachment =
+      vk_struct_init::get_attachment_description(
+          _shadow_pass.image_allocation.format, //
+          VK_SAMPLE_COUNT_1_BIT,                //
+          VK_ATTACHMENT_LOAD_OP_CLEAR,          //
+          VK_ATTACHMENT_STORE_OP_STORE,         //
+          VK_ATTACHMENT_LOAD_OP_DONT_CARE,      //
+          VK_ATTACHMENT_STORE_OP_DONT_CARE,     //
+          VK_IMAGE_LAYOUT_UNDEFINED,            //
+          _shadow_pass.layout                   //
+      );
+
+  VkAttachmentReference depth_attachment_ref = {
+      0, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+
+  // This render pass depth tests depend on prev renderpass fragment shader
+  VkSubpassDependency subpass_dep1 = vk_struct_init::get_subpass_dependency(
+      VK_SUBPASS_EXTERNAL, //
+      0,                   //
+      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+      VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, //
+      VK_ACCESS_SHADER_READ_BIT,
+      VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, //
+      VK_DEPENDENCY_BY_REGION_BIT);
+
+  // Next renderpass fragment shades depends on this renderpass write to depth
+  // attachment
+  VkSubpassDependency subpass_dep2 = vk_struct_init::get_subpass_dependency(
+      0,
+      VK_SUBPASS_EXTERNAL, //
+      VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, //
+      VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+      VK_ACCESS_SHADER_READ_BIT, //
+      VK_DEPENDENCY_BY_REGION_BIT);
+
+  VkSubpassDependency subpass_dependencies[2] = {subpass_dep1, subpass_dep2};
+
+  VkSubpassDescription subpass = vk_struct_init::get_subpass_description(
+      0,                               //
+      VK_PIPELINE_BIND_POINT_GRAPHICS, //
+      0, nullptr,                      //
+      0, nullptr,                      //
+      nullptr,
+      &depth_attachment_ref, //
+      0, nullptr);
+
+  // Define a renderpass
+  VkRenderPassCreateInfo render_pass_info =
+      vk_struct_init::get_create_render_pass_info(0,                    //
+                                                  1, &depth_attachment, //
+                                                  1, &subpass,          //
+                                                  1, subpass_dependencies);
+  VK_CHECK(vkCreateRenderPass(_device, &render_pass_info, nullptr,
+                              &_shadow_pass.render_pass),
+           "Failed to create renderpass");
+
+  _deallocator.push([=]() {
+    vkDestroyRenderPass(_device, _shadow_pass.render_pass, nullptr);
+  });
+
+  // Framebuffers are connections between renderpass and images
+  VkFramebufferCreateInfo fb_info = {};
+  fb_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+  fb_info.pNext = nullptr;
+  fb_info.attachmentCount = 1;
+  fb_info.renderPass = _shadow_pass.render_pass;
+  fb_info.width = SHADOW_MAP_RESOLUTION;
+  fb_info.height = SHADOW_MAP_RESOLUTION;
+  fb_info.layers = 1;
+
+  fb_info.pAttachments = &(_shadow_pass.image_allocation.view);
+  VK_CHECK(vkCreateFramebuffer(_device, &fb_info, nullptr,
+                               &_shadow_pass.framebuffer),
+           "Failed to create shadow map framebuffer");
+  _deallocator.push([=]() {
+    vkDestroyFramebuffer(_device, _shadow_pass.framebuffer, nullptr);
+  });
+
+  _shadow_pass.size = {SHADOW_MAP_RESOLUTION, SHADOW_MAP_RESOLUTION};
+
+  return true;
+}
+
+void Renderer::check_renderables() {
+  rend::ECS::EntityRegistry &registry = rend::ECS::get_entity_registry();
+
+  for (rend::ECS::EntityRegistry::ArchetypeIterator rb_iterator =
+           registry.archetype_iterator<Renderable, Transform>();
+       rb_iterator.valid(); ++rb_iterator) {
+    rend::ECS::EID eid = *rb_iterator;
+
+    Renderable &renderable = registry.get_component<Renderable>(eid);
+
+    if (renderable.p_mesh != nullptr &&
+        !renderable.p_mesh->buffer_allocation.buffer_allocated) {
+      renderable.p_mesh->generate_allocation_buffer(_allocator, _deallocator);
+    }
+
+    if (renderable.p_texture == nullptr) {
+      renderable.p_texture = Texture::get_error_texture();
+    }
+
+    if (!renderable.p_texture->image_allocated()) {
+      renderable.p_texture->allocate_image(_device, _allocator, _deallocator);
+      transfer_texture_to_gpu(renderable.p_texture);
+      if (texture_to_index.find(renderable.p_texture.get()) ==
+          texture_to_index.end()) {
+        texture_to_index.insert(
+            {renderable.p_texture.get(), texture_to_index.size()});
+      }
+    }
+  }
+  static bool all_textures_allocated = false;
+  if (!all_textures_allocated) {
+    bind_textures();
+    all_textures_allocated = true;
+  }
+}
+
 bool Renderer::draw() {
-  rend::ECS::EntityRegistry &entity_registry = rend::ECS::get_entity_registry();
-
-  check_materials();
-
-  begin_render_pass();
-
-  Eigen::Matrix4f projection = camera->get_projection_matrix();
+  Eigen::Matrix4f projection = camera->projection;
   Eigen::Matrix4f view = camera->get_view_matrix();
 
   int debug_buffer_size = 0;
 
-  Material *prev_material = nullptr;
-  for (auto &pair : _renderables) {
-    Material *material = pair.first;
-    if (prev_material != material) {
-      vkCmdBindPipeline(_cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                        material->pipeline);
-      vkCmdBindDescriptorSets(_cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                              material->pipeline_layout, 0,
-                              material->ds_allocator.descriptor_sets.size(),
-                              material->ds_allocator.descriptor_sets.data(), 0,
-                              nullptr);
+  void *datas[3] = {view.data(), projection.data(), camera->position.data()};
+  size_t sizes[3] = {sizeof(float) * view.size(),
+                     sizeof(float) * projection.size(), sizeof(float) * 3};
 
-      void *datas[3] = {view.data(), projection.data(),
-                        camera->position.data()};
-      size_t sizes[3] = {sizeof(float) * view.size(),
-                         sizeof(float) * projection.size(), sizeof(float) * 3};
+  _camera_buffer.copy_from(datas, sizes, 3);
+  _light_buffer.copy_from(lights.data(), sizeof(LightSource) * lights.size());
 
-      material->_camera_buffer.copy_from(datas, sizes, 3);
-      material->update_lights(lights);
-    }
+  check_renderables();
 
-    for (std::pair<Renderable, rend::ECS::EID> &renderable_data : pair.second) {
-      VkDeviceSize offset = 0;
-      PushConstants constants;
-      Renderable &renderable = renderable_data.first;
-      Transform &object =
-          entity_registry.get_component<Transform>(renderable_data.second);
+  begin_command_buffer(_command_buffer);
 
-      Eigen::Matrix4f model = object.get_model_matrix();
-      memcpy(constants.model, model.data(), sizeof(float) * model.size());
+  begin_render_pass(_shadow_pass.render_pass, _shadow_pass.framebuffer,
+                    _command_buffer, _shadow_pass.size, 1.0f, -1.0f);
 
-      { // Mesh
-        vkCmdBindVertexBuffers(_cmd_buffer, 0, 1,
-                               &renderable.p_mesh->buffer_allocation.buffer,
-                               &offset);
+  shadow_material.bind_descriptor_buffer(1, 0, _camera_buffer);
+  shadow_material.bind_descriptor_buffer(1, 1, _light_buffer);
 
-        vkCmdPushConstants(_cmd_buffer, material->pipeline_layout,
-                           VK_SHADER_STAGE_VERTEX_BIT, 0, 16 * sizeof(float),
-                           &constants);
-        vkCmdDraw(_cmd_buffer, renderable.p_mesh->vertex_count(), 1, 0, 0);
-      }
-    }
-  }
+  render_scene(_command_buffer, true);
 
-  if (debug_renderable.debug_verts_to_draw > 0) {
-    debug_renderable.buffer.copy_from(debug_renderable.debug_buffer,
-                                      debug_renderable.debug_verts_to_draw * 6 *
-                                          sizeof(float));
-    VkDeviceSize offset = 0;
-    vkCmdBindPipeline(_cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                      debug_renderable.material.pipeline);
-    vkCmdBindVertexBuffers(_cmd_buffer, 0, 1, &debug_renderable.buffer.buffer,
-                           &offset);
+  end_render_pass(_command_buffer);
 
-    vkCmdDraw(_cmd_buffer, debug_renderable.debug_verts_to_draw, 1, 0, 0);
-    debug_renderable.debug_verts_to_draw = 0;
-  }
+  begin_render_pass(_render_pass, _framebuffers[_swapchain_img_idx],
+                    _command_buffer, _window_dims, 1.0f, 0.2f);
 
-  end_render_pass();
+  geometry_material.bind_descriptor_buffer(1, 0, _camera_buffer);
+  geometry_material.bind_descriptor_buffer(1, 1, _light_buffer);
+  geometry_material.ds_allocator.bind_image(1, 2, _shadow_pass.image_allocation,
+                                            _shadow_pass.layout,
+                                            _shadow_pass.sampler);
+  lights_material.bind_descriptor_buffer(1, 0, _camera_buffer);
+  lights_material.bind_descriptor_buffer(1, 1, _light_buffer);
 
+  render_scene(_command_buffer, false);
+
+  debug_material.bind_descriptor_buffer(0, 0, _camera_buffer);
+  render_debug(_command_buffer);
+
+  end_render_pass(_command_buffer);
+  submit_command_buffer(_command_buffer);
   _frame_number++;
   return true;
+}
+
+void Renderer::bind_textures() {
+  std::vector<VkDescriptorImageInfo> image_infos(MAX_TEXTURE_COUNT);
+  for (auto iterator = texture_to_index.begin();
+       iterator != texture_to_index.end(); iterator++) {
+    Texture *texture = iterator->first;
+    int index = iterator->second;
+    image_infos[index] = VkDescriptorImageInfo{};
+    image_infos[index].imageLayout = texture->layout;
+    image_infos[index].imageView = texture->image_allocation.view;
+    image_infos[index].sampler = texture->sampler;
+  }
+
+  int valid_texture_count = texture_to_index.size();
+  auto dummy_texture = Texture::get_error_texture();
+  for (int i = 0; i < MAX_TEXTURE_COUNT - valid_texture_count; i++) {
+    image_infos[valid_texture_count + i] = VkDescriptorImageInfo{};
+    image_infos[valid_texture_count + i].imageLayout = dummy_texture->layout;
+    image_infos[valid_texture_count + i].imageView =
+        dummy_texture->image_allocation.view;
+    image_infos[valid_texture_count + i].sampler = dummy_texture->sampler;
+  }
+
+  geometry_material.ds_allocator.bind_image_infos(0, 0, image_infos);
+  shadow_material.ds_allocator.bind_image_infos(0, 0, image_infos);
+}
+
+void Renderer::render_scene(VkCommandBuffer &command_buffer, bool shadow_pass) {
+  rend::ECS::EntityRegistry &registry = rend::ECS::get_entity_registry();
+
+  for (rend::ECS::EntityRegistry::ArchetypeIterator rb_iterator =
+           registry.archetype_iterator<Renderable, Transform>();
+       rb_iterator.valid(); ++rb_iterator) {
+    rend::ECS::EID eid = *rb_iterator;
+
+    Renderable &renderable = registry.get_component<Renderable>(eid);
+    if (renderable.type == RenderableType::Light && shadow_pass) {
+      continue;
+    }
+    Material &material = shadow_pass ? shadow_material
+                         : renderable.type == RenderableType::Geometry
+                             ? geometry_material
+                             : lights_material;
+    Mesh::Ptr mesh = renderable.p_mesh;
+
+    Transform &transform = registry.get_component<Transform>(eid);
+
+    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      material.pipeline);
+
+    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            material.pipeline_layout, 0,
+                            material.ds_allocator.descriptor_sets.size(),
+                            material.ds_allocator.descriptor_sets.data(), 0,
+                            nullptr);
+
+    VkDeviceSize offset = 0;
+    PushConstants constants;
+
+    Eigen::Matrix4f model = transform.get_model_matrix();
+    Eigen::Matrix4f::Map(constants.model) = model;
+
+    constants.texture_idx = texture_to_index[renderable.p_texture.get()];
+
+    vkCmdPushConstants(command_buffer, material.pipeline_layout,
+                       material.spec.push_constants_description.stageFlags, 0,
+                       sizeof(PushConstants), &constants);
+
+    vkCmdBindVertexBuffers(command_buffer, 0, 1,
+                           &mesh->buffer_allocation.buffer, &offset);
+    vkCmdDraw(command_buffer, renderable.p_mesh->vertex_count(), 1, 0, 0);
+  }
+}
+
+void Renderer::render_debug(VkCommandBuffer &command_buffer) {
+  if (debug_renderable.debug_verts_to_draw == 0) {
+    return;
+  }
+
+  debug_renderable.buffer.copy_from(debug_renderable.debug_buffer,
+                                    debug_renderable.debug_verts_to_draw * 6 *
+                                        sizeof(float));
+  VkDeviceSize offset = 0;
+  vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    debug_material.pipeline);
+  vkCmdBindVertexBuffers(command_buffer, 0, 1, &debug_renderable.buffer.buffer,
+                         &offset);
+  vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                          debug_material.pipeline_layout, 0,
+                          debug_material.ds_allocator.descriptor_sets.size(),
+                          debug_material.ds_allocator.descriptor_sets.data(), 0,
+                          nullptr);
+  vkCmdDraw(command_buffer, debug_renderable.debug_verts_to_draw, 1, 0, 0);
+  debug_renderable.debug_verts_to_draw = 0;
 }
 } // namespace rend

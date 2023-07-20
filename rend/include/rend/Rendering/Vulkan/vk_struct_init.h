@@ -12,7 +12,8 @@
 namespace vk_struct_init {
 inline VkImageCreateInfo get_image_create_info(VkFormat format,
                                                VkImageUsageFlags usage,
-                                               VkExtent3D extent) {
+                                               VkExtent3D extent,
+                                               VkImageType type) {
   /*
   typedef struct VkImageCreateInfo {
     VkStructureType          sType; +
@@ -37,7 +38,7 @@ inline VkImageCreateInfo get_image_create_info(VkFormat format,
   image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   image_info.pNext = nullptr;
   image_info.flags = 0;
-  image_info.imageType = VK_IMAGE_TYPE_2D; // Not interested in 1d or 3d images
+  image_info.imageType = type;
   image_info.format = format;
   image_info.extent = extent;
   image_info.mipLevels = 1;
@@ -51,7 +52,8 @@ inline VkImageCreateInfo get_image_create_info(VkFormat format,
 
 inline VkImageViewCreateInfo
 get_image_view_create_info(VkImage image, VkFormat format,
-                           VkImageAspectFlags aspectFlags) {
+                           VkImageAspectFlags aspectFlags,
+                           VkImageViewType type) {
 
   /*
   typedef struct VkImageViewCreateInfo {
@@ -71,7 +73,7 @@ get_image_view_create_info(VkImage image, VkFormat format,
   view_info.pNext = nullptr;
   view_info.flags = 0;
   view_info.image = image;
-  view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+  view_info.viewType = type;
   view_info.format = format;
 
   view_info.subresourceRange.aspectMask = aspectFlags;

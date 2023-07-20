@@ -16,6 +16,8 @@ struct BufferAllocation {
   size_t size;
   VmaAllocator allocator = VK_NULL_HANDLE;
 
+  bool buffer_allocated = false;
+
   static BufferAllocation create(size_t size, VkBufferUsageFlags buffer_usage,
                                  VmaMemoryUsage alloc_usage,
                                  VmaAllocator allocator) {
@@ -36,9 +38,9 @@ struct BufferAllocation {
     if (vmaCreateBuffer(allocator, &buffer_info, &vmaalloc_info,
                         &buffer_allocation.buffer,
                         &buffer_allocation.allocation, nullptr) != VK_SUCCESS) {
-      return {};
+      throw std::runtime_error("Failed to create buffer");
     }
-
+    buffer_allocation.buffer_allocated = true;
     return buffer_allocation;
   }
 
@@ -76,6 +78,8 @@ struct ImageAllocation {
   VmaAllocation allocation = VK_NULL_HANDLE;
   VkFormat format;
 
+  bool buffer_allocated = false;
+
   // Ptrs from the renderer
   VmaAllocator allocator;
   VkDevice device;
@@ -93,18 +97,17 @@ struct ImageAllocation {
         allocator, &image_create_info, &allocation_info,
         &image_allocation.image, &image_allocation.allocation, nullptr);
     if (image_result != VK_SUCCESS) {
-      std::cerr << "ImageAllocation: Failed to create image" << std::endl;
-      return {};
+      throw std::runtime_error("ImageAllocation: Failed to create image");
     }
     image_view_create_info.image = image_allocation.image;
     VkResult image_view_result = vkCreateImageView(
         device, &image_view_create_info, nullptr, &image_allocation.view);
 
     if (image_view_result != VK_SUCCESS) {
-
-      std::cerr << "ImageAllocation: Failed to create image view" << std::endl;
-      return {};
+      throw std::runtime_error("ImageAllocation: Failed to create image view");
     }
+
+    image_allocation.buffer_allocated = true;
     return image_allocation;
   }
 
@@ -144,7 +147,8 @@ static std::unordered_map<VkFormat, int> FORMAT_SIZES = {
 };
 
 inline VertexInfoDescription
-get_vertex_info_description(std::vector<VkFormat> attributes) {
+get_vertex_info_description(std::vector<VkFormat> attributes,
+                            int custom_stride) {
   VertexInfoDescription description;
   VkVertexInputBindingDescription mainBinding = {};
   mainBinding.binding = 0;
@@ -159,7 +163,13 @@ get_vertex_info_description(std::vector<VkFormat> attributes) {
     stride += FORMAT_SIZES[attributes[i]];
     description.attributes.push_back(attr);
   }
-  mainBinding.stride = stride;
+
+  if (custom_stride > 0) {
+    mainBinding.stride = custom_stride;
+  } else {
+    mainBinding.stride = stride;
+  }
+
   description.bindings.push_back(mainBinding);
   return description;
 }

@@ -15,7 +15,6 @@ class Mesh {
   // Contiguous chunk of vertices which is passed to the shader as is
   std::vector<float> _vertices;
   int _vertex_count = 0;
-  bool _buffer_generated = false;
 
 public:
   typedef std::shared_ptr<Mesh> Ptr;
@@ -27,7 +26,7 @@ public:
   // Loads a mesh, it's shaders and fills the vertex buffer
   Mesh(Path path);
   int vertex_count() const;
-  bool generate_allocation_buffer(VmaAllocator &allocator,
+  void generate_allocation_buffer(VmaAllocator &allocator,
                                   Deallocator &deallocator_queue);
 
   Eigen::Vector3f get_vertex_pos(int idx) const {

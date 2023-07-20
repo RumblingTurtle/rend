@@ -13,6 +13,8 @@ struct Binding {
   size_t descriptor_count;
 };
 
+using BindingMatrix = std::vector<std::vector<Binding>>;
+
 struct DescriptorSetAssembler {
   VkDescriptorSetLayout descriptor_set_layout = VK_NULL_HANDLE;
   std::vector<Binding> bindings;
@@ -57,6 +59,7 @@ struct DescriptorSetAssembler {
 };
 
 struct DescriptorSetAllocator {
+  BindingMatrix bindings;
   std::vector<DescriptorSetAssembler> assemblers;
   VkDevice device;
 
@@ -66,6 +69,7 @@ struct DescriptorSetAllocator {
   void init(std::vector<std::vector<Binding>> &bindings, VkDevice device,
             VkDescriptorPool descriptor_pool) {
     this->device = device;
+    this->bindings = bindings;
     assemblers.resize(bindings.size());
     layouts.resize(bindings.size(), VK_NULL_HANDLE);
     descriptor_sets.resize(bindings.size(), VK_NULL_HANDLE);
@@ -125,10 +129,32 @@ struct DescriptorSetAllocator {
       throw std::runtime_error("Binding index out of range");
     }
 
+    if (assemblers[set_idx].bindings[binding_idx].type !=
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER &&
+        assemblers[set_idx].bindings[binding_idx].type !=
+            VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE) {
+      throw std::runtime_error("Binding type mismatch");
+    }
+
     VkDescriptorImageInfo image_info = {};
     image_info.imageLayout = layout;
     image_info.imageView = allocation.view;
     image_info.sampler = sampler;
+
+    VkWriteDescriptorSet write = vk_struct_init::get_descriptor_write_info(
+        binding_idx, descriptor_sets[set_idx],
+        assemblers[set_idx].bindings[binding_idx].type, 1, nullptr,
+        &image_info);
+
+    vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+  }
+
+  void bind_image_infos(int set_idx, int binding_idx,
+                        std::vector<VkDescriptorImageInfo> image_infos) {
+    if (set_idx >= assemblers.size() ||
+        binding_idx >= assemblers[set_idx].bindings.size()) {
+      throw std::runtime_error("Binding index out of range");
+    }
 
     if (assemblers[set_idx].bindings[binding_idx].type !=
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER &&
@@ -139,8 +165,8 @@ struct DescriptorSetAllocator {
 
     VkWriteDescriptorSet write = vk_struct_init::get_descriptor_write_info(
         binding_idx, descriptor_sets[set_idx],
-        assemblers[set_idx].bindings[binding_idx].type, 1, nullptr,
-        &image_info);
+        assemblers[set_idx].bindings[binding_idx].type, image_infos.size(),
+        nullptr, image_infos.data());
 
     vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
   }

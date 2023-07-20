@@ -38,11 +38,12 @@ Mesh::Mesh(Path path) {
 
 int Mesh::vertex_count() const { return _vertex_count; }
 
-bool Mesh::generate_allocation_buffer(VmaAllocator &allocator,
+void Mesh::generate_allocation_buffer(VmaAllocator &allocator,
                                       Deallocator &deallocator_queue) {
-  if (_buffer_generated) {
-    return true;
+  if (buffer_allocation.buffer_allocated) {
+    throw std::runtime_error("Mesh allocation buffer already generated");
   }
+
   buffer_allocation = BufferAllocation::create(
       _vertices.size() * sizeof(float), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
       VMA_MEMORY_USAGE_CPU_TO_GPU, allocator);
@@ -52,6 +53,4 @@ bool Mesh::generate_allocation_buffer(VmaAllocator &allocator,
 
   buffer_allocation.copy_from(_vertices.data(),
                               _vertices.size() * sizeof(float));
-  _buffer_generated = true;
-  return true;
 }

@@ -1,8 +1,6 @@
 #version 450
 
 layout(location = 0) in vec3 vert_pos;
-layout(location = 1) in vec3 vert_normal;
-layout(location = 2) in vec2 vert_uv;
 
 layout(set = 1, binding = 0) uniform CameraData {
   mat4 view;
@@ -16,7 +14,17 @@ layout(push_constant) uniform PushConstants {
 }
 push_constants;
 
+layout(set = 1, binding = 1) uniform LightSource {
+  vec4 position;
+  vec4 color;
+  vec4 direction;
+  mat4 view_matrix;
+  mat4 projection_matrix;
+}
+light_sources[6];
+
 void main() {
-  gl_Position = c_data.projection * c_data.view * push_constants.model *
+  gl_Position = light_sources[0].projection_matrix *
+                light_sources[0].view_matrix * push_constants.model *
                 vec4(vert_pos, 1.0f);
 }

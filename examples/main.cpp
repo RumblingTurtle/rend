@@ -47,17 +47,16 @@ int main() {
 
   dingus1_renderable.p_mesh =
       std::make_shared<Mesh>(Path{ASSET_DIRECTORY} / Path{"models/dingus.fbx"});
-  dingus1_renderable.p_material = std::make_shared<Material>(
-      Path{}, Path{}, Path{ASSET_DIRECTORY} / "textures/dingus_nowhiskers.jpg",
-      std::vector<VkFormat>{VK_FORMAT_R32G32B32_SFLOAT,
-                            VK_FORMAT_R32G32B32_SFLOAT,
-                            VK_FORMAT_R32G32_SFLOAT});
+  dingus1_renderable.type = RenderableType::Geometry;
+
+  dingus1_renderable.p_texture = std::make_shared<Texture>(
+      Path{ASSET_DIRECTORY} / "textures/dingus_nowhiskers.jpg");
 
   dingus1_transform.scale = Eigen::Vector3f::Ones() * 0.5f;
 
   dingus1_aabb = AABB(*dingus1_renderable.p_mesh);
 
-  dingus1_transform.position = Eigen::Vector3f{0, 40, 0.0f};
+  dingus1_transform.position = Eigen::Vector3f{-1, 40, 0.0f};
   dingus1_rigidbody.dimensions =
       dingus1_transform.scale.cwiseProduct(dingus1_aabb.max_local -
                                            dingus1_aabb.min_local) /
@@ -71,7 +70,9 @@ int main() {
   AABB &dingus2_aabb = registry.add_component<AABB>(dingus2);
 
   dingus2_renderable.p_mesh = dingus1_renderable.p_mesh;
-  dingus2_renderable.p_material = dingus1_renderable.p_material;
+  dingus2_renderable.type = RenderableType::Geometry;
+  dingus2_renderable.p_texture = dingus1_renderable.p_texture;
+
   dingus2_transform.scale = Eigen::Vector3f::Ones() * 0.2f;
 
   dingus2_aabb = dingus1_aabb;
@@ -92,7 +93,8 @@ int main() {
 
   sphere_renderable.p_mesh =
       std::make_shared<Mesh>(Path{ASSET_DIRECTORY} / Path{"models/sphere.obj"});
-  sphere_renderable.p_material = dingus1_renderable.p_material;
+  sphere_renderable.type = RenderableType::Geometry;
+  sphere_renderable.p_texture = dingus1_renderable.p_texture;
 
   sphere_transform.scale = Eigen::Vector3f::Ones() * 5.0f;
   sphere_transform.position = Eigen::Vector3f{-20, 5, 0.0f};
@@ -106,14 +108,12 @@ int main() {
   Renderable &cube_renderable = registry.add_component<Renderable>(cube);
 
   cube_renderable.p_mesh = Primitives::get_default_cube_mesh();
-  cube_renderable.p_material = std::make_shared<Material>(
-      Path{Path{ASSET_DIRECTORY} / "shaders/bin/light_vert.spv"},
-      Path{Path{ASSET_DIRECTORY} / "shaders/bin/light_frag.spv"}, Path{},
-      std::vector<VkFormat>{VK_FORMAT_R32G32B32_SFLOAT,
-                            VK_FORMAT_R32G32B32_SFLOAT,
-                            VK_FORMAT_R32G32_SFLOAT});
+
+  cube_renderable.type = RenderableType::Light;
+  cube_renderable.p_texture = Texture::get_error_texture();
 
   cube_transform.scale = Eigen::Vector3f::Ones() * 0.2f;
+  cube_transform.scale.z() *= 2;
 
   // Floor
   rend::ECS::EID floor_cube = registry.register_entity();
@@ -123,7 +123,7 @@ int main() {
   AABB &floor_aabb = registry.add_component<AABB>(floor_cube);
 
   floor_renderable.p_mesh = cube_renderable.p_mesh;
-  floor_renderable.p_material = dingus1_renderable.p_material;
+  sphere_renderable.type = RenderableType::Geometry;
 
   floor_aabb = AABB(*floor_renderable.p_mesh);
 
@@ -136,15 +136,10 @@ int main() {
                                          floor_aabb.min_local) /
       2;
 
-  renderer.load_renderable(dingus1);
-  renderer.load_renderable(dingus2);
-  renderer.load_renderable(sphere);
-  renderer.load_renderable(cube);
-  renderer.load_renderable(floor_cube);
-
   // audio_player.play();
 
-  renderer.lights[0].color = Eigen::Vector4f::Ones();
+  renderer.lights[0].enable();
+  renderer.lights[0].set_color(Eigen::Vector3f::Ones());
   renderer.camera->position = Eigen::Vector3f{0.0f, 10.0f, -20.0f};
 
   physics_system.init();
@@ -160,9 +155,13 @@ int main() {
     physics_system.update(dt);
     debug_buffer_fill_system.update(dt);
 
-    renderer.lights[0].position =
-        Eigen::Vector3f{10.0f * std::sin(time), 10.0f, 10.0f * std::cos(time)};
-    cube_transform.position = renderer.lights[0].position;
+    renderer.lights[0].set_position(
+        Eigen::Vector3f{10.0f * std::sin(time), 10.0f, 10.0f * std::cos(time)});
+    renderer.lights[0].set_direction(
+        -renderer.lights[0].get_position().normalized());
+
+    cube_transform.position = renderer.lights[0].get_position();
+    cube_transform.lookat(Eigen::Vector3f::Zero());
 
     renderer.camera->position +=
         input_handler.is_key_held(rend::input::KeyCode::W) *

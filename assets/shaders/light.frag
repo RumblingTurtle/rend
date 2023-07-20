@@ -1,5 +1,5 @@
 #version 450
 
-layout(location = 0) out vec4 outFragColor;
+layout(location = 0) out vec4 out_frag_color;
 
-void main() { outFragColor = vec4(1.0f); }
+void main() { out_frag_color = vec4(1.0f); }

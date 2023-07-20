@@ -43,6 +43,20 @@ struct DebugBufferFillSystem : public System {
                                    20, Eigen::Vector3f(0, 0, 1));
       }
     }
+    Eigen::Vector3f light_pos = renderer.lights[0].get_position();
+    Eigen::Matrix4f light_view =
+        get_view_matrix(light_pos, renderer.lights[0].get_direction())
+            .inverse();
+
+    Eigen::Vector3f up = (light_view * Eigen::Vector4f{0, 1, 0, 1}).head<3>();
+    Eigen::Vector3f right =
+        (light_view * Eigen::Vector4f{1, 0, 0, 1}).head<3>();
+    Eigen::Vector3f forward =
+        (light_view * Eigen::Vector4f{0, 0, 1, 1}).head<3>();
+
+    renderer.draw_debug_line(light_pos, forward, Eigen::Vector3f(0, 0, 1));
+    renderer.draw_debug_line(light_pos, up, Eigen::Vector3f(0, 1, 0));
+    renderer.draw_debug_line(light_pos, right, Eigen::Vector3f(1, 0, 0));
   }
 };
 } // namespace rend::systems

@@ -156,6 +156,8 @@ EntityRegistry::ArchetypeIterator::ArchetypeIterator(
     std::function<bool(EID)> predicate) {
   this->predicate = predicate;
   registered_iterator = get_entity_registry().registered_entities.begin();
+  current_id = *registered_iterator;
+  registered_iterator++;
 }
 
 void EntityRegistry::ArchetypeIterator::find_next() {

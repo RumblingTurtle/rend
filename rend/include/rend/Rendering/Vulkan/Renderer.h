@@ -14,7 +14,6 @@
 #include <vulkan/vulkan.h>
 
 #include <rend/Rendering/Vulkan/Mesh.h>
-#include <rend/Rendering/Vulkan/RenderPipelineBuilder.h>
 #include <rend/Rendering/Vulkan/Renderable.h>
 #include <rend/Rendering/Vulkan/vk_helper_types.h>
 #include <rend/Rendering/Vulkan/vk_struct_init.h>
@@ -26,6 +25,7 @@
 namespace rend {
 class Renderer {
   static constexpr int MAX_DEBUG_VERTICES = 100000;
+  static constexpr int SHADOW_MAP_RESOLUTION = 1024;
 
   VkExtent2D _window_dims{1000, 1000};
   SDL_Window *_window;
@@ -50,7 +50,7 @@ class Renderer {
 
   // CMD buffer
   VkCommandPool _cmd_pool;
-  VkCommandBuffer _cmd_buffer;
+  VkCommandBuffer _command_buffer;
 
   // Renderpass
   VkRenderPass _render_pass;
@@ -65,10 +65,6 @@ class Renderer {
   // VMA allocator
   VmaAllocator _allocator;
 
-  std::unordered_map<Material *,
-                     std::vector<std::pair<Renderable, rend::ECS::EID>>>
-      _renderables;
-
   Deallocator _deallocator;
 
   int _frame_number = 0;
@@ -78,29 +74,46 @@ class Renderer {
 
   struct {
     VkCommandPool pool;
-    VkCommandBuffer buffer;
     VkFence fence;
   } _submit_buffer;
 
   VkDeviceSize min_ubo_alignment;
 
+  struct SubpassData {
+    VkRenderPass render_pass;
+    ImageAllocation image_allocation;
+    VkSampler sampler;
+    VkImageLayout layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+    VkFramebuffer framebuffer;
+    VkExtent2D size;
+  };
+
+  SubpassData _shadow_pass;
+
+  BufferAllocation _camera_buffer;
+  BufferAllocation _light_buffer;
+
 public:
+  Material debug_material;
+  Material geometry_material;
+  Material lights_material;
+  Material shadow_material;
+
   struct DebugVertex {
     float start[3];
     float start_color[3];
-    float end[3];
-    float end_color[3];
   };
 
   struct {
     BufferAllocation buffer;
-    Material material;
     float debug_buffer[MAX_DEBUG_VERTICES * sizeof(DebugVertex)];
     int debug_verts_to_draw = 0;
   } debug_renderable;
 
   std::unique_ptr<Camera> camera;
   std::vector<LightSource> lights;
+
+  std::unordered_map<Texture *, int> texture_to_index;
 
   Renderer() {
     camera = std::make_unique<Camera>(
@@ -135,29 +148,41 @@ public:
 
   bool init_debug_renderable();
 
-  // Caches enity's renderable component + allocates mesh buffer
-  bool load_renderable(rend::ECS::EID eid);
-
   // Starts submission command buffer recording
   bool begin_one_time_submit();
 
   // Submits a command to _submit_buffer buffer
   bool end_one_time_submit();
 
-  // Checks if all submited materials are built
-  bool check_materials();
+  bool init_materials();
 
-  void init_material(Material &material);
-  void transfer_texture_to_gpu(Texture &texture);
+  // Check if renderables need to be allocated
+  void check_renderables();
 
-  bool begin_render_pass();
+  void bind_textures();
+  void transfer_texture_to_gpu(Texture::Ptr texture);
 
-  bool end_render_pass();
+  bool begin_render_pass(VkRenderPass &render_pass, VkFramebuffer &framebuffer,
+                         VkCommandBuffer &command_buffer, VkExtent2D &extent,
+                         float depth_clear_value, float color_clear_value);
+  void end_render_pass(VkCommandBuffer &command_buffer);
+
+  bool begin_command_buffer(VkCommandBuffer &command_buffer);
+  bool submit_command_buffer(VkCommandBuffer &command_buffer);
+
+  void render_scene(VkCommandBuffer &command_buffer, bool shadow_pass);
+  void render_debug(VkCommandBuffer &command_buffer);
+
+  bool begin_shadow_pass();
+  bool end_shadow_pass();
 
   bool draw();
 
   void cleanup();
 
+  bool init_shadow_map();
+
+  // Debugging primitive drawing
   void draw_debug_line(const Eigen::Vector3f &start, const Eigen::Vector3f &end,
                        const Eigen::Vector3f &color);
 
