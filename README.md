@@ -1,30 +1,31 @@
-# Basic Vulkan renderer
+# REND Game Engine
 
-This is a repo for a simple Vulkan based rederer. It may be used as a boilerplate base for your projects. You can expand it by implementing:
+<p align="center">
+  <img src="assets/demo.gif" alt="animated" />
+</p>
 
-- Asset management system
-- ECS 
-(https://github.com/skypjack/entt)
-- Scripting system (https://github.com/jordanvrtanoski/luacpp)
-- Physics
-(https://github.com/bulletphysics/bullet3)
-- UI rendering
-(https://github.com/ocornut/imgui)
+Vulkan based open-source, C++ game engine for 3D games
 
+## Platforms
 
+As of now only tested on Ubuntu 20.04
 ## Requirements
-- SDL2
-- Vulkan
-- glslangValidator
-- assimp
-- VMA
-- Eigen
+`Git submodules`
+- [*Jolt Physics*](https://github.com/jrouwe/JoltPhysics.git)
+- [*VulkanMemoryAllocator*](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator)
+- [*stb*](https://github.com/nothings/stb)
+- [*vk-bootstrap*](https://github.com/charles-lunarg/vk-bootstrap)
+
+`Ubuntu packages`
+- Eigen: ```libeigen3-dev```
+- Assimp: ```assimp-utils```
+- VMA: ```libvma-utils```
+- GLSL Tools: ```lslang-tools```
+- SDL2: ```libsdl2-dev```
 
 ```
-sudo apt install assimp-utils libvma-utils libeigen3-dev glslang-tools
+sudo apt install assimp-utils libvma-utils glslang-tools libsdl2-dev
 ``` 
-
-Bootstrapping and buffer allocation is handled by submodules. Namely vk-bootstrap (https://github.com/charles-lunarg/vk-bootstrap) and VMA (https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git)
 ## Building
 
 ```

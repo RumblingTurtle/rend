@@ -34,7 +34,7 @@ push_constants;
 layout(set = 1, binding = 2) uniform sampler2D shadow_texture;
 
 vec3 ambient = vec3(0.001f);
-#define DEPTH_BIAS 0.0001f
+#define DEPTH_BIAS 0.00001f
 #define SHADOW_MAP_RESOLUTION 1024
 #define SHADOW_ATLAS_SIZE 8192
 #define SHADOW_MAP_SCALE SHADOW_MAP_RESOLUTION / SHADOW_ATLAS_SIZE
