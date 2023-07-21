@@ -138,8 +138,22 @@ int main() {
 
   // audio_player.play();
 
-  renderer.lights[0].enable();
-  renderer.lights[0].set_color(Eigen::Vector3f::Ones());
+  int N_LIGHTS = 32;
+  int light_speeds[N_LIGHTS];
+
+  for (int i = 0; i < N_LIGHTS; i++) {
+    LightSource &light = renderer.lights[i];
+    light.enable();
+    light.set_color(Eigen::Vector3f{rand_float(0.2, 1), rand_float(0.2, 1),
+                                    rand_float(0.2, 1)});
+    light.set_position(
+        Eigen::Vector3f{rand_float(-50, 50), 10.0f, rand_float(-50, 50)});
+    light.set_fov(M_PI * 0.3f);
+    light.set_direction(-light.get_position().normalized());
+    light_speeds[i] = rand_float(-100, 100);
+    light.set_intensity(0.1);
+  }
+
   renderer.camera->position = Eigen::Vector3f{0.0f, 10.0f, -20.0f};
 
   bool draw_debug = false;
@@ -163,13 +177,22 @@ int main() {
       draw_debug = !draw_debug;
     }
 
-    renderer.lights[0].set_position(
-        Eigen::Vector3f{10.0f * std::sin(time), 10.0f, 10.0f * std::cos(time)});
-    renderer.lights[0].set_direction(
-        -renderer.lights[0].get_position().normalized());
+    for (int i = 0; i < N_LIGHTS; i++) {
+      LightSource &light = renderer.lights[i];
+      Eigen::Vector3f light_right_vec = light.get_view_mat().col(0).head<3>();
+      Eigen::Vector3f light_position = light.get_position();
+      light.set_position(light_position +
+                         light_speeds[i] * dt * light_right_vec);
+      light.set_direction(-light.get_position().normalized());
+      if (i == 0) {
+        cube_transform.position = light.get_position();
+      }
+    }
 
-    cube_transform.position = renderer.lights[0].get_position();
     cube_transform.lookat(Eigen::Vector3f::Zero());
+
+    // renderer.camera->position = renderer.lights[0].get_position();
+    // renderer.camera->lookat(Eigen::Vector3f::Zero());
 
     renderer.camera->position +=
         input_handler.is_key_held(rend::input::KeyCode::W) *

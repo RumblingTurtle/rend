@@ -8,11 +8,12 @@
 #include <rend/Rendering/Vulkan/Texture.h>
 #include <unordered_map>
 
-constexpr int MAX_LIGHTS = 8;
+constexpr int MAX_LIGHTS = 64;
 
 struct PushConstants {
   float model[16];
   int texture_idx;
+  int light_index;
 };
 
 struct CameraInfo {
@@ -81,7 +82,7 @@ public:
 
   // Initialization
   bool build(VkDevice &device, VkDescriptorPool &descriptor_pool,
-             VkRenderPass &render_pass, VkExtent2D &window_dims,
+             VkRenderPass &render_pass, const VkExtent2D &window_dims,
              Deallocator &deallocation_queue);
 
   // Descriptor binding

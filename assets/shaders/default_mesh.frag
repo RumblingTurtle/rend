@@ -22,11 +22,12 @@ layout(set = 1, binding = 1) uniform LightSource {
   mat4 view_matrix;
   mat4 projection_matrix;
 }
-light_sources[6];
+light_sources[64];
 
 layout(push_constant) uniform PushConstants {
   mat4 model;
   int texture_index;
+  int light_index;
 }
 push_constants;
 
@@ -34,6 +35,10 @@ layout(set = 1, binding = 2) uniform sampler2D shadow_texture;
 
 vec3 ambient = vec3(0.001f);
 #define DEPTH_BIAS 0.0001f
+#define SHADOW_MAP_RESOLUTION 1024
+#define SHADOW_ATLAS_SIZE 8192
+#define SHADOW_MAP_SCALE SHADOW_MAP_RESOLUTION / SHADOW_ATLAS_SIZE
+#define MAX_LIGHTS 64
 
 float shadow_test(int light_idx) {
   float shadow = 1.0f;
@@ -42,9 +47,17 @@ float shadow_test(int light_idx) {
                               vec4(frag_pos_world.xyz, 1.0);
 
   vec3 shadow_coords = light_mvp_projection.xyz / light_mvp_projection.w;
-  if (shadow_coords.z > -1.0f && shadow_coords.z < 1.0f) {
+  vec2 atlas_offset = vec2(light_idx % 8, light_idx / 8) * SHADOW_MAP_SCALE;
+  vec2 shadow_coords_renormalized =
+      (shadow_coords.xy * 0.5f + 0.5f) * SHADOW_MAP_SCALE;
+
+  if (shadow_coords.z > -1.0f && shadow_coords.z < 1.0f &&
+      shadow_coords_renormalized.x > 0.0f &&
+      shadow_coords_renormalized.x < 1.0f &&
+      shadow_coords_renormalized.y > 0.0f &&
+      shadow_coords_renormalized.y < 1.0f) {
     float closest_depth =
-        texture(shadow_texture, shadow_coords.xy * 0.5f + 0.5f).r;
+        texture(shadow_texture, shadow_coords_renormalized + atlas_offset).r;
     float current_depth = shadow_coords.z;
     shadow = current_depth - DEPTH_BIAS > closest_depth ? 0.0f : 1.0f;
   }
@@ -71,11 +84,20 @@ vec3 calculate_light_contrib(int light_idx, vec3 view_dir) {
 
   float distance = length(light_to_frag);
 
-  float attenuation =
-      1.0f / (1.0f + 0.001 * distance + 0.0001 * (distance * distance));
-
   float theta_cosine = dot(light_to_frag_normalized, light_dir);
-  attenuation *= pow(theta_cosine, 10) * shadow_test(light_idx);
+  float half_fov = cos(light_fov / 2);
+
+  if (theta_cosine < half_fov) {
+    return vec3(0);
+  }
+
+  float soft_cutoff =
+      pow(clamp((theta_cosine - half_fov) / (0.95 - half_fov), 0.0, 1.0), 4);
+
+  float attenuation =
+      soft_cutoff * shadow_test(light_idx) * 1.0f /
+      (1.0f + 0.001 * distance + 0.0001 * (distance * distance));
+
   return ambient * attenuation + diffuse * attenuation + specular * attenuation;
 }
 

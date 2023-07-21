@@ -25,7 +25,10 @@
 namespace rend {
 class Renderer {
   static constexpr int MAX_DEBUG_VERTICES = 100000;
+  static constexpr int SHADOW_ATLAS_LIGHTS_PER_ROW = 8;
   static constexpr int SHADOW_MAP_RESOLUTION = 1024;
+  static constexpr int SHADOW_ATLAS_RESOLUTION =
+      SHADOW_ATLAS_LIGHTS_PER_ROW * SHADOW_MAP_RESOLUTION;
 
   VkExtent2D _window_dims{1000, 1000};
   SDL_Window *_window;
@@ -85,7 +88,6 @@ class Renderer {
     VkSampler sampler;
     VkImageLayout layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
     VkFramebuffer framebuffer;
-    VkExtent2D size;
   };
 
   SubpassData _shadow_pass;
@@ -163,8 +165,9 @@ public:
   void transfer_texture_to_gpu(Texture::Ptr texture);
 
   bool begin_render_pass(VkRenderPass &render_pass, VkFramebuffer &framebuffer,
-                         VkCommandBuffer &command_buffer, VkExtent2D &extent,
-                         float depth_clear_value, float color_clear_value);
+                         VkCommandBuffer &command_buffer,
+                         const VkExtent2D &extent, float depth_clear_value,
+                         float color_clear_value);
   void end_render_pass(VkCommandBuffer &command_buffer);
 
   bool begin_command_buffer(VkCommandBuffer &command_buffer);

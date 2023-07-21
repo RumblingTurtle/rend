@@ -55,3 +55,7 @@ inline Eigen::Matrix4f get_view_matrix(Eigen::Vector3f position,
 
   return model.inverse();
 }
+
+inline float rand_float(float min, float max) {
+  return min + (max - min) * static_cast<float>(rand()) / RAND_MAX;
+}

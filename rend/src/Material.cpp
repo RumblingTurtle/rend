@@ -5,7 +5,7 @@ Material::Material() {}
 Material::Material(MaterialSpec spec) : spec(spec) {}
 
 bool Material::build(VkDevice &device, VkDescriptorPool &descriptor_pool,
-                     VkRenderPass &render_pass, VkExtent2D &window_dims,
+                     VkRenderPass &render_pass, const VkExtent2D &window_dims,
                      Deallocator &deallocation_queue) {
   ds_allocator.init(spec.bindings, device, descriptor_pool);
   deallocation_queue.push([&]() { ds_allocator.destroy(descriptor_pool); });
@@ -22,7 +22,7 @@ bool Material::build(VkDevice &device, VkDescriptorPool &descriptor_pool,
       device, spec.push_constants_description, ds_allocator, pipeline_layout);
 
   _pipeline_builder.build_pipeline(
-      device, render_pass, window_dims, shader, pipeline_layout,
+      device, render_pass, shader, pipeline_layout,
       get_vertex_info_description(spec.input_attributes, spec.vertex_stride),
       spec.topology_type, pipeline);
 

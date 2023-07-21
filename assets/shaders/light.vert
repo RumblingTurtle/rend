@@ -13,6 +13,7 @@ c_data;
 layout(push_constant) uniform PushConstants {
   mat4 model;
   int texture_index;
+  int light_index;
 }
 push_constants;
 

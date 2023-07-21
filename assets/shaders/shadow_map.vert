@@ -11,6 +11,7 @@ c_data;
 layout(push_constant) uniform PushConstants {
   mat4 model;
   int texture_index;
+  int light_index;
 }
 push_constants;
 
@@ -21,10 +22,10 @@ layout(set = 1, binding = 1) uniform LightSource {
   mat4 view_matrix;
   mat4 projection_matrix;
 }
-light_sources[6];
+light_sources[64];
 
 void main() {
-  gl_Position = light_sources[0].projection_matrix *
-                light_sources[0].view_matrix * push_constants.model *
-                vec4(vert_pos, 1.0f);
+  gl_Position = light_sources[push_constants.light_index].projection_matrix *
+                light_sources[push_constants.light_index].view_matrix *
+                push_constants.model * vec4(vert_pos, 1.0f);
 }

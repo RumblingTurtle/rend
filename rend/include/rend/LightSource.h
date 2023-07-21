@@ -24,14 +24,15 @@ public:
 
   Eigen::Vector3f get_position() { return Eigen::Vector3f::Map(position); }
   Eigen::Vector3f get_direction() { return Eigen::Vector3f::Map(direction); }
-  float get_fov() { return position[3]; }
+  Eigen::Matrix4f get_view_mat() { return Eigen::Matrix4f::Map(view_matrix); }
+  float get_fov() { return fov; }
 
   void set_fov(float fov) {
-    position[3] = fov;
+    this->fov = fov;
     update_VP();
   }
   void set_type(LightType type) {
-    position[3] = type;
+    this->type = type;
     update_VP();
   }
   void set_direction(const Eigen::Vector3f &dir) {
@@ -50,7 +51,7 @@ public:
   void update_VP() {
     if (enabled()) {
       Eigen::Matrix4f::Map(projection_matrix) =
-          get_projection_matrix(180.0f * get_fov() / M_PI, 1, 0.1f, 500.0f);
+          get_projection_matrix(180.0f * get_fov() / M_PI, 1, 0.01f, 500.0f);
       Eigen::Matrix4f::Map(view_matrix) =
           get_view_matrix(get_position(), get_direction());
     }
@@ -58,7 +59,7 @@ public:
 
   LightSource() {
     disable();
-    set_fov(M_PI_2);
+    set_fov(M_PI * 0.6f);
     set_type(DIRECTIONAL_LIGHT);
     set_direction(Eigen::Vector3f::UnitY());
     set_color(Eigen::Vector3f::Ones());

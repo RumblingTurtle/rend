@@ -39,8 +39,7 @@ public:
   }
 
   void build_pipeline(VkDevice &device, VkRenderPass &render_pass,
-                      VkExtent2D extent, Shader &shader,
-                      VkPipelineLayout &_pipeline_layout,
+                      Shader &shader, VkPipelineLayout &_pipeline_layout,
                       VertexInfoDescription vertex_info_description,
                       VkPrimitiveTopology topology, VkPipeline &newPipeline) {
     _vertex_info_description = vertex_info_description;
@@ -55,7 +54,20 @@ public:
     // we don't use multisampling, so just run the default one
     set_multisampling_state_create_info();
     set_color_blending_info();
-    set_viewport_state_info(extent);
+
+    VkDynamicState dynamicState[2] = {VK_DYNAMIC_STATE_VIEWPORT,
+                                      VK_DYNAMIC_STATE_SCISSOR};
+    VkPipelineDynamicStateCreateInfo dynamicStateCreateInfo{};
+    dynamicStateCreateInfo.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    dynamicStateCreateInfo.dynamicStateCount = 2;
+    dynamicStateCreateInfo.pDynamicStates = dynamicState;
+
+    _viewportState.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    _viewportState.pViewports = nullptr;
+    _viewportState.viewportCount = 1;
+    _viewportState.scissorCount = 1;
 
     _shaderStages.clear();
     _shaderStages.push_back(shader.get_vertex_shader_stage_info());
@@ -68,7 +80,6 @@ public:
     pipelineInfo.pStages = _shaderStages.data();
     pipelineInfo.pVertexInputState = &_vertex_input_info;
     pipelineInfo.pInputAssemblyState = &_input_assembly;
-    pipelineInfo.pViewportState = &_viewportState;
     pipelineInfo.pRasterizationState = &_rasterizer;
     pipelineInfo.pMultisampleState = &_multisampling;
     pipelineInfo.pColorBlendState = &_color_blending;
@@ -77,34 +88,14 @@ public:
     pipelineInfo.renderPass = render_pass;
     pipelineInfo.subpass = 0;
     pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
+    pipelineInfo.pViewportState = &_viewportState;
+    pipelineInfo.pDynamicState = &dynamicStateCreateInfo;
 
     if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo,
                                   nullptr, &newPipeline) != VK_SUCCESS) {
       std::cerr << "failed to create pipeline" << std::endl;
       newPipeline = VK_NULL_HANDLE;
     }
-  }
-
-  void set_viewport_state_info(VkExtent2D extent) {
-    _viewport.x = 0.0f;
-    _viewport.y = 0.0f;
-    _viewport.width = (float)extent.width;
-    _viewport.height = (float)extent.height;
-    _viewport.minDepth = 0.0f;
-    _viewport.maxDepth = 1.0f;
-
-    _scissor.offset = {0, 0};
-    _scissor.extent = extent;
-
-    _viewportState.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    _viewportState.flags = 0;
-    _viewportState.pNext = nullptr;
-
-    _viewportState.viewportCount = 1;
-    _viewportState.pViewports = &_viewport;
-    _viewportState.scissorCount = 1;
-    _viewportState.pScissors = &_scissor;
   }
 
   void set_color_blending_info() {

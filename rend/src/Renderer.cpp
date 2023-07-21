@@ -149,8 +149,9 @@ bool Renderer::init_materials() {
                              FORMAT_SIZES[VK_FORMAT_R32G32_SFLOAT];
 
     shadow_material = Material{mat_spec};
-    shadow_material.build(_device, _descriptor_pool, _shadow_pass.render_pass,
-                          _shadow_pass.size, _deallocator);
+    shadow_material.build(
+        _device, _descriptor_pool, _shadow_pass.render_pass,
+        VkExtent2D{SHADOW_MAP_RESOLUTION, SHADOW_MAP_RESOLUTION}, _deallocator);
   }
   return true;
 }
@@ -384,7 +385,7 @@ bool Renderer::init_sync_primitives() {
 bool Renderer::init_descriptor_pool() {
   VkDescriptorPoolCreateInfo pool_info = {};
 
-  VkDescriptorPoolSize scene = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 100};
+  VkDescriptorPoolSize scene = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 200};
   VkDescriptorPoolSize material = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                                    100};
 
@@ -572,17 +573,18 @@ bool Renderer::begin_command_buffer(VkCommandBuffer &command_buffer) {
 bool Renderer::begin_render_pass(VkRenderPass &render_pass,
                                  VkFramebuffer &framebuffer,
                                  VkCommandBuffer &command_buffer,
-                                 VkExtent2D &extent, float depth_clear_value,
+                                 const VkExtent2D &extent,
+                                 float depth_clear_value,
                                  float color_clear_value) {
   std::vector<VkClearValue> clear_values;
-  if (color_clear_value > 0.0f) {
+  if (color_clear_value >= 0.0f) {
     VkClearValue clear_value{};
     clear_value.color = {
         {color_clear_value, color_clear_value, color_clear_value, 1.0f}};
     clear_values.push_back(clear_value);
   }
 
-  if (depth_clear_value > 0.0f) {
+  if (depth_clear_value >= 0.0f) {
     VkClearValue depth_clear{};
     depth_clear.depthStencil = {depth_clear_value, 0};
     clear_values.push_back(depth_clear);
@@ -732,6 +734,7 @@ void Renderer::transfer_texture_to_gpu(Texture::Ptr p_texture) {
 }
 
 bool Renderer::init_shadow_map() {
+
   VkSamplerCreateInfo sampler_info = vk_struct_init::get_sampler_create_info(
       VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
   VK_CHECK(
@@ -745,7 +748,7 @@ bool Renderer::init_shadow_map() {
   VkImageCreateInfo image_info = vk_struct_init::get_image_create_info(
       VK_FORMAT_D32_SFLOAT,
       VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-      VkExtent3D{SHADOW_MAP_RESOLUTION, SHADOW_MAP_RESOLUTION, 1},
+      VkExtent3D{SHADOW_ATLAS_RESOLUTION, SHADOW_ATLAS_RESOLUTION, 1},
       VK_IMAGE_TYPE_2D);
 
   VkImageViewCreateInfo image_view_info =
@@ -822,14 +825,13 @@ bool Renderer::init_shadow_map() {
     vkDestroyRenderPass(_device, _shadow_pass.render_pass, nullptr);
   });
 
-  // Framebuffers are connections between renderpass and images
   VkFramebufferCreateInfo fb_info = {};
   fb_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
   fb_info.pNext = nullptr;
   fb_info.attachmentCount = 1;
   fb_info.renderPass = _shadow_pass.render_pass;
-  fb_info.width = SHADOW_MAP_RESOLUTION;
-  fb_info.height = SHADOW_MAP_RESOLUTION;
+  fb_info.width = SHADOW_ATLAS_RESOLUTION;
+  fb_info.height = SHADOW_ATLAS_RESOLUTION;
   fb_info.layers = 1;
 
   fb_info.pAttachments = &(_shadow_pass.image_allocation.view);
@@ -839,8 +841,6 @@ bool Renderer::init_shadow_map() {
   _deallocator.push([=]() {
     vkDestroyFramebuffer(_device, _shadow_pass.framebuffer, nullptr);
   });
-
-  _shadow_pass.size = {SHADOW_MAP_RESOLUTION, SHADOW_MAP_RESOLUTION};
 
   return true;
 }
@@ -874,6 +874,7 @@ void Renderer::check_renderables() {
       }
     }
   }
+
   static bool all_textures_allocated = false;
   if (!all_textures_allocated) {
     bind_textures();
@@ -898,8 +899,10 @@ bool Renderer::draw() {
 
   begin_command_buffer(_command_buffer);
 
-  begin_render_pass(_shadow_pass.render_pass, _shadow_pass.framebuffer,
-                    _command_buffer, _shadow_pass.size, 1.0f, -1.0f);
+  begin_render_pass(
+      _shadow_pass.render_pass, _shadow_pass.framebuffer, _command_buffer,
+      VkExtent2D{SHADOW_ATLAS_RESOLUTION, SHADOW_ATLAS_RESOLUTION}, 1.0f,
+      -1.0f);
 
   shadow_material.bind_descriptor_buffer(1, 0, _camera_buffer);
   shadow_material.bind_descriptor_buffer(1, 1, _light_buffer);
@@ -909,7 +912,7 @@ bool Renderer::draw() {
   end_render_pass(_command_buffer);
 
   begin_render_pass(_render_pass, _framebuffers[_swapchain_img_idx],
-                    _command_buffer, _window_dims, 1.0f, 0.2f);
+                    _command_buffer, _window_dims, 1.0f, 0.0f);
 
   geometry_material.bind_descriptor_buffer(1, 0, _camera_buffer);
   geometry_material.bind_descriptor_buffer(1, 1, _light_buffer);
@@ -959,6 +962,21 @@ void Renderer::bind_textures() {
 void Renderer::render_scene(VkCommandBuffer &command_buffer, bool shadow_pass) {
   rend::ECS::EntityRegistry &registry = rend::ECS::get_entity_registry();
 
+  VkViewport viewport;
+  VkRect2D scissor;
+  if (shadow_pass) {
+    viewport = {0, 0, SHADOW_MAP_RESOLUTION, SHADOW_MAP_RESOLUTION, 0, 1};
+    scissor = {0, 0, SHADOW_MAP_RESOLUTION, SHADOW_MAP_RESOLUTION};
+  } else {
+    viewport = {0,
+                0,
+                static_cast<float>(_window_dims.width),
+                static_cast<float>(_window_dims.height),
+                0,
+                1};
+    scissor = {0, 0, _window_dims.width, _window_dims.height};
+  }
+
   for (rend::ECS::EntityRegistry::ArchetypeIterator rb_iterator =
            registry.archetype_iterator<Renderable, Transform>();
        rb_iterator.valid(); ++rb_iterator) {
@@ -986,20 +1004,50 @@ void Renderer::render_scene(VkCommandBuffer &command_buffer, bool shadow_pass) {
                             nullptr);
 
     VkDeviceSize offset = 0;
-    PushConstants constants;
-
-    Eigen::Matrix4f model = transform.get_model_matrix();
-    Eigen::Matrix4f::Map(constants.model) = model;
-
-    constants.texture_idx = texture_to_index[renderable.p_texture.get()];
-
-    vkCmdPushConstants(command_buffer, material.pipeline_layout,
-                       material.spec.push_constants_description.stageFlags, 0,
-                       sizeof(PushConstants), &constants);
-
     vkCmdBindVertexBuffers(command_buffer, 0, 1,
                            &mesh->buffer_allocation.buffer, &offset);
-    vkCmdDraw(command_buffer, renderable.p_mesh->vertex_count(), 1, 0, 0);
+
+    PushConstants constants;
+    Eigen::Matrix4f model = transform.get_model_matrix();
+    Eigen::Matrix4f::Map(constants.model) = model;
+    constants.texture_idx = texture_to_index[renderable.p_texture.get()];
+    constants.light_index = 0;
+
+    if (shadow_pass) {
+      for (int light_idx = 0; light_idx < lights.size(); light_idx++) {
+        if (!lights[light_idx].enabled()) {
+          continue;
+        }
+        int light_x = light_idx % SHADOW_ATLAS_LIGHTS_PER_ROW;
+        int light_y = light_idx / SHADOW_ATLAS_LIGHTS_PER_ROW;
+
+        viewport = {static_cast<float>(light_x * SHADOW_MAP_RESOLUTION),
+                    static_cast<float>(light_y * SHADOW_MAP_RESOLUTION),
+                    SHADOW_MAP_RESOLUTION,
+                    SHADOW_MAP_RESOLUTION,
+                    0,
+                    1};
+        scissor = {light_x * SHADOW_MAP_RESOLUTION,
+                   light_y * SHADOW_MAP_RESOLUTION, SHADOW_MAP_RESOLUTION,
+                   SHADOW_MAP_RESOLUTION};
+
+        vkCmdSetViewport(_command_buffer, 0, 1, &viewport);
+        vkCmdSetScissor(_command_buffer, 0, 1, &scissor);
+
+        constants.light_index = light_idx;
+        vkCmdPushConstants(command_buffer, material.pipeline_layout,
+                           material.spec.push_constants_description.stageFlags,
+                           0, sizeof(PushConstants), &constants);
+        vkCmdDraw(command_buffer, renderable.p_mesh->vertex_count(), 1, 0, 0);
+      }
+    } else {
+      vkCmdSetViewport(_command_buffer, 0, 1, &viewport);
+      vkCmdSetScissor(_command_buffer, 0, 1, &scissor);
+      vkCmdPushConstants(command_buffer, material.pipeline_layout,
+                         material.spec.push_constants_description.stageFlags, 0,
+                         sizeof(PushConstants), &constants);
+      vkCmdDraw(command_buffer, renderable.p_mesh->vertex_count(), 1, 0, 0);
+    }
   }
 }
 
