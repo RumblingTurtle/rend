@@ -117,6 +117,7 @@ public:
 
   std::unordered_map<Texture *, int> texture_to_index;
 
+  bool debug_mode = false;
   Renderer() {
     camera = std::make_unique<Camera>(
         90.f, _window_dims.width / _window_dims.height, 0.1f, 200.0f);

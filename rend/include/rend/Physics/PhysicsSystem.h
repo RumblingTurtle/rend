@@ -40,6 +40,22 @@ static constexpr BroadPhaseLayer MOVING(1);
 static constexpr uint NUM_LAYERS(2);
 }; // namespace BroadPhaseLayers
 
+Vec3 eigen_to_jolt(const Eigen::Vector3f &vec) {
+  return Vec3{vec.x(), vec.y(), vec.z()};
+}
+
+Eigen::Vector3f jolt_to_eigen(const Vec3 &vec) {
+  return Eigen::Vector3f{vec.GetX(), vec.GetY(), vec.GetZ()};
+}
+
+Quat eigen_to_jolt(const Eigen::Quaternionf &quat) {
+  return Quat{quat.x(), quat.y(), quat.z(), quat.w()};
+}
+
+Eigen::Quaternionf jolt_to_eigen(const Quat &quat) {
+  return Eigen::Quaternionf{quat.GetW(), quat.GetX(), quat.GetY(), quat.GetZ()};
+}
+
 struct PhysicsSystemInterface {
 
   static constexpr uint MAX_BODIES = 10240;
@@ -173,9 +189,9 @@ struct PhysicsSystemInterface {
       SphereShapeSettings body_settings{rigidbody.dimensions[0]};
       body_shape_result = body_settings.Create();
     } else if (rigidbody.primitive_type == Rigidbody::PrimitiveType::BOX) {
-      BoxShapeSettings body_settings{Vec3(rigidbody.dimensions[0],
+      BoxShapeSettings body_settings{Vec3{rigidbody.dimensions[0],
                                           rigidbody.dimensions[1],
-                                          rigidbody.dimensions[2])};
+                                          rigidbody.dimensions[2]}};
       body_shape_result = body_settings.Create();
     }
 
@@ -192,13 +208,10 @@ struct PhysicsSystemInterface {
     rigidbody.body_id = p_body->GetID();
     body_interface.AddBody(p_body->GetID(), EActivation::Activate);
 
-    Vec3 position{transform.position.x(), transform.position.y(),
-                  transform.position.z()};
-    Quat rotation{transform.rotation.x(), transform.rotation.y(),
-                  transform.rotation.z(), transform.rotation.w()};
-    body_interface.SetPositionAndRotation(p_body->GetID(), position, rotation,
-                                          EActivation::Activate);
-    body_interface.SetLinearVelocity(p_body->GetID(), Vec3{0.0f, 0.0f, 0.0f});
+    body_interface.SetPositionAndRotation(
+        p_body->GetID(), eigen_to_jolt(transform.position),
+        eigen_to_jolt(transform.rotation), EActivation::Activate);
+    body_interface.SetLinearVelocity(p_body->GetID(), Vec3::sZero());
 
     registered_bodies.push_back(p_body);
   }
@@ -221,20 +234,17 @@ struct PhysicsSystemInterface {
 
   Eigen::Vector3f get_body_position(BodyID body_id) {
     BodyInterface &body_interface = jph_physics_system->GetBodyInterface();
-    JPH::Vec3 position = body_interface.GetPosition(body_id);
-    return Eigen::Vector3f{position.GetX(), position.GetY(), position.GetZ()};
+    return jolt_to_eigen(body_interface.GetPosition(body_id));
+  }
+
+  Eigen::Vector3f get_body_com_position(BodyID body_id) {
+    BodyInterface &body_interface = jph_physics_system->GetBodyInterface();
+    return jolt_to_eigen(body_interface.GetCenterOfMassPosition(body_id));
   }
 
   Eigen::Quaternionf get_body_orientation(BodyID body_id) {
     BodyInterface &body_interface = jph_physics_system->GetBodyInterface();
-    JPH::Quat rotation = body_interface.GetRotation(body_id);
-
-    return Eigen::Quaternionf{
-        rotation.GetW(),
-        rotation.GetX(),
-        rotation.GetY(),
-        rotation.GetZ(),
-    };
+    return jolt_to_eigen(body_interface.GetRotation(body_id));
   }
 
   ~PhysicsSystemInterface() {
@@ -295,7 +305,6 @@ struct PhysicsSystem : public System {
 
       if (registry.is_component_enabled<AABB>(eid)) {
         AABB &aabb = registry.get_component<AABB>(eid);
-
         { // Update global frame AABBs
           Eigen::Matrix<float, 8, 4> vertices =
               (transform.get_model_matrix() *
@@ -308,8 +317,14 @@ struct PhysicsSystem : public System {
         }
       }
 
-      transform.position = physics_interface.get_body_position(rb.body_id);
+      Renderer &renderer = get_renderer();
+
+      transform.position = physics_interface.get_body_position(rb.body_id) +
+                           transform.rotation * rb.com_offset;
       transform.rotation = physics_interface.get_body_orientation(rb.body_id);
+
+      renderer.draw_debug_sphere(transform.position, 1.0f, 8,
+                                 Eigen::Vector3f{1.0f, 0.0f, 0.0f});
     }
   }
 };

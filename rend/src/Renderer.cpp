@@ -420,6 +420,9 @@ bool Renderer::init_debug_renderable() {
 void Renderer::draw_debug_line(const Eigen::Vector3f &start,
                                const Eigen::Vector3f &end,
                                const Eigen::Vector3f &color) {
+  if (!debug_mode) {
+    return;
+  }
   if (MAX_DEBUG_VERTICES <= debug_renderable.debug_verts_to_draw * 2) {
     throw std::runtime_error("Debug buffer overflow");
   }
@@ -438,6 +441,9 @@ void Renderer::draw_debug_line(const Eigen::Vector3f &start,
 
 void Renderer::draw_debug_quad(const Eigen::Matrix<float, 4, 3> &quad_verts,
                                const Eigen::Vector3f &color) {
+  if (!debug_mode) {
+    return;
+  }
   for (int i = 0; i < 4; i++) {
     draw_debug_line(quad_verts.row(i), quad_verts.row((i + 1) % 4), color);
   }
@@ -445,6 +451,9 @@ void Renderer::draw_debug_quad(const Eigen::Matrix<float, 4, 3> &quad_verts,
 
 void Renderer::draw_debug_box(const Eigen::Matrix<float, 8, 4> &box_verts,
                               const Eigen::Vector3f &color) {
+  if (!debug_mode) {
+    return;
+  }
   /*
   Vertex order is :
   0-3 top clockwise
@@ -476,7 +485,9 @@ void Renderer::draw_debug_box(const Eigen::Matrix<float, 8, 4> &box_verts,
 
 void Renderer::draw_debug_sphere(const Eigen::Vector3f &position, float radius,
                                  int resolution, const Eigen::Vector3f &color) {
-
+  if (!debug_mode) {
+    return;
+  }
   Eigen::MatrixXf sphere_verts(resolution, 3);
   for (int i = 0; i < resolution; i++) {
     float theta = i * 2 * M_PI / resolution;

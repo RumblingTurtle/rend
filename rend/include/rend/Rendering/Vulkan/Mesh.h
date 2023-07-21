@@ -40,4 +40,17 @@ inline Mesh::Ptr &get_default_cube_mesh() {
       std::make_shared<Mesh>(Path{ASSET_DIRECTORY} / Path{"models/cube.obj"});
   return p_cube;
 }
+
+inline Mesh::Ptr &get_default_sphere_mesh() {
+  static Mesh::Ptr p_sphere =
+      std::make_shared<Mesh>(Path{ASSET_DIRECTORY} / Path{"models/sphere.obj"});
+  return p_sphere;
+}
+
+inline Mesh::Ptr &get_default_dingus_mesh() {
+  static Mesh::Ptr p_sphere =
+      std::make_shared<Mesh>(Path{ASSET_DIRECTORY} / Path{"models/dingus.fbx"});
+  return p_sphere;
+}
+
 } // namespace Primitives
