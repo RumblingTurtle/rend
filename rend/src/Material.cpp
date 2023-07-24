@@ -24,7 +24,7 @@ bool Material::build(VkDevice &device, VkDescriptorPool &descriptor_pool,
   _pipeline_builder.build_pipeline(
       device, render_pass, shader, pipeline_layout,
       get_vertex_info_description(spec.input_attributes, spec.vertex_stride),
-      spec.topology_type, pipeline);
+      spec.topology_type, pipeline, spec.color_attachment_count);
 
   deallocation_queue.push([=] {
     vkDestroyPipeline(device, pipeline, nullptr);

@@ -1,19 +1,14 @@
 #version 450
 
-layout(location = 0) in vec2 vert_uv;
-layout(location = 1) in vec4 frag_normal_world;
-layout(location = 2) in vec4 frag_pos_world;
-
+layout(location = 0) in vec2 screen_uv;
 layout(location = 0) out vec4 out_frag_color;
-
-layout(set = 0, binding = 0) uniform sampler2D textures[10];
 
 layout(set = 1, binding = 0) uniform CameraData {
   mat4 view;
   mat4 projection;
   vec4 position;
 }
-c_data;
+camera_info;
 
 layout(set = 1, binding = 1) uniform LightSource {
   vec4 position;
@@ -24,14 +19,18 @@ layout(set = 1, binding = 1) uniform LightSource {
 }
 light_sources[64];
 
+layout(set = 1, binding = 2) uniform sampler2D shadow_texture;
+layout(set = 1, binding = 3) uniform sampler2D world_normal;
+layout(set = 1, binding = 4) uniform sampler2D world_positions;
+layout(set = 1, binding = 5) uniform sampler2D albedo_texture;
+layout(set = 1, binding = 6) uniform sampler2D depth;
+
 layout(push_constant) uniform PushConstants {
   mat4 model;
   int texture_index;
   int light_index;
 }
 push_constants;
-
-layout(set = 1, binding = 2) uniform sampler2D shadow_texture;
 
 vec3 ambient = vec3(0.001f);
 #define DEPTH_BIAS 0.00001f
@@ -40,7 +39,7 @@ vec3 ambient = vec3(0.001f);
 #define SHADOW_MAP_SCALE SHADOW_MAP_RESOLUTION / SHADOW_ATLAS_SIZE
 #define MAX_LIGHTS 64
 
-float shadow_test(int light_idx) {
+float shadow_test(int light_idx, vec4 frag_pos_world) {
   float shadow = 1.0f;
   vec4 light_mvp_projection = light_sources[light_idx].projection_matrix *
                               light_sources[light_idx].view_matrix *
@@ -64,7 +63,8 @@ float shadow_test(int light_idx) {
   return shadow;
 }
 
-vec3 calculate_light_contrib(int light_idx, vec3 view_dir) {
+vec3 calculate_light_contrib(int light_idx, vec3 view_dir,
+                             vec4 frag_normal_world, vec4 frag_pos_world) {
   vec3 light_color = light_sources[light_idx].color.xyz;
   float light_fov = light_sources[light_idx].position.w;
   vec3 light_dir = light_sources[light_idx].direction.xyz;
@@ -95,22 +95,31 @@ vec3 calculate_light_contrib(int light_idx, vec3 view_dir) {
       pow(clamp((theta_cosine - half_fov) / (0.95 - half_fov), 0.0, 1.0), 4);
 
   float attenuation =
-      soft_cutoff * shadow_test(light_idx) * 1.0f /
+      soft_cutoff * 1.0f /
       (1.0f + 0.001 * distance + 0.0001 * (distance * distance));
 
-  return ambient * attenuation + diffuse * attenuation + specular * attenuation;
+  return ambient + diffuse * attenuation + specular * attenuation;
 }
 
 void main() {
-  vec4 frag_color = texture(textures[push_constants.texture_index], vert_uv);
-  vec3 view_dir = normalize(c_data.view[2].xyz);
+  vec3 view_dir = normalize(camera_info.view[2].xyz);
+
+  vec4 frag_normal_world = texture(world_normal, screen_uv);
+  vec4 frag_pos_world = texture(world_positions, screen_uv);
+  float frag_depth = texture(depth, screen_uv).r;
+
+  vec4 frag_color = texture(albedo_texture, screen_uv);
+
   vec3 out_color = vec3(0);
-  for (int i = 0; i < 6; i++) {
+  for (int i = 0; i < 64; i++) {
     if (light_sources[i].color.w < 0) {
       continue;
     }
-    out_color += calculate_light_contrib(i, view_dir);
+    out_color += calculate_light_contrib(i, view_dir, frag_normal_world,
+                                         frag_pos_world) *
+                 shadow_test(i, frag_pos_world);
   }
 
   out_frag_color = vec4(out_color * frag_color.xyz, 1);
+  gl_FragDepth = frag_depth;
 }

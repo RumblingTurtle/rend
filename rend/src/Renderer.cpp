@@ -27,7 +27,7 @@ bool Renderer::init() {
                  init_cmd_buffer() && init_renderpass() &&
                  init_framebuffers() && init_sync_primitives() &&
                  init_descriptor_pool() && init_debug_renderable() &&
-                 init_shadow_map() && init_materials();
+                 init_shadow_map() && init_deferred_pass() && init_materials();
   return _initialized;
 }
 
@@ -101,8 +101,91 @@ bool Renderer::init_vulkan() {
 }
 
 bool Renderer::init_materials() {
+  { // G-buffer
+    MaterialSpec mat_spec{};
+    mat_spec.color_attachment_count = 3;
+    mat_spec.vert_shader =
+        Path{ASSET_DIRECTORY} / "shaders/bin/deferred_vert.spv";
+    mat_spec.frag_shader =
+        Path{ASSET_DIRECTORY} / "shaders/bin/deferred_frag.spv";
+    mat_spec.bindings = {
+        {Binding{VK_SHADER_STAGE_FRAGMENT_BIT,              //
+                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, //
+                 0,                                         //
+                 MAX_TEXTURE_COUNT}},                       // Textures
+        {Binding{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, //
+                 VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,                         //
+                 sizeof(CameraInfo),                                        //
+                 1},
+         Binding{VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, //
+                 VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,                         //
+                 sizeof(LightSource),                                       //
+                 MAX_LIGHTS},                  // Camera info (view, projection)
+         Binding{VK_SHADER_STAGE_FRAGMENT_BIT, //
+                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, //
+                 0,                                         //
+                 1}}};                                      // Shadow map
+
+    mat_spec.input_attributes = {VK_FORMAT_R32G32B32_SFLOAT, // Position
+                                 VK_FORMAT_R32G32B32_SFLOAT, // Normal
+                                 VK_FORMAT_R32G32_SFLOAT};   // UV
+
+    g_buffer.material = Material{mat_spec};
+
+    g_buffer.material.build(_device, _descriptor_pool, g_buffer.render_pass,
+                            _window_dims, _deallocator);
+  }
+
+  { // Composite pass
+    MaterialSpec mat_spec{};
+    mat_spec.color_attachment_count = 1;
+    mat_spec.vert_shader =
+        Path{ASSET_DIRECTORY} / "shaders/bin/composite_vert.spv";
+    mat_spec.frag_shader =
+        Path{ASSET_DIRECTORY} / "shaders/bin/composite_frag.spv";
+    mat_spec.bindings = {
+        {Binding{VK_SHADER_STAGE_FRAGMENT_BIT,                              //
+                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,                 //
+                 0,                                                         //
+                 MAX_TEXTURE_COUNT}},                                       //
+        {Binding{VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, //
+                 VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,                         //
+                 sizeof(CameraInfo),                                        //
+                 1},                                                        //
+         Binding{VK_SHADER_STAGE_FRAGMENT_BIT,                              //
+                 VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,                         //
+                 sizeof(LightSource),                                       //
+                 MAX_LIGHTS},                                               //
+         Binding{VK_SHADER_STAGE_FRAGMENT_BIT,                              //
+                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,                 //
+                 0,                                                         //
+                 1},                                                        //
+         Binding{VK_SHADER_STAGE_FRAGMENT_BIT,                              //
+                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,                 //
+                 0,                                                         //
+                 1},                                                        //
+         Binding{VK_SHADER_STAGE_FRAGMENT_BIT,                              //
+                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,                 //
+                 0,                                                         //
+                 1},                                                        //
+         Binding{VK_SHADER_STAGE_FRAGMENT_BIT,                              //
+                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,                 //
+                 0,                                                         //
+                 1},                                                        //
+         Binding{VK_SHADER_STAGE_FRAGMENT_BIT,                              //
+                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,                 //
+                 0,                                                         //
+                 1}}};                                                      //
+
+    mat_spec.input_attributes = {};
+    composite_pass_material = Material{mat_spec}; // Color
+    composite_pass_material.build(_device, _descriptor_pool, _render_pass,
+                                  _window_dims, _deallocator);
+  }
+
   { // Debug
     MaterialSpec mat_spec{};
+    mat_spec.color_attachment_count = 1;
     mat_spec.vert_shader = Path{ASSET_DIRECTORY} / "shaders/bin/debug_vert.spv";
     mat_spec.frag_shader = Path{ASSET_DIRECTORY} / "shaders/bin/debug_frag.spv";
     mat_spec.bindings = {
@@ -117,28 +200,14 @@ bool Renderer::init_materials() {
                          _deallocator);
   }
 
-  { // Lights
-    MaterialSpec mat_spec{};
-    mat_spec.vert_shader = Path{ASSET_DIRECTORY} / "shaders/bin/light_vert.spv";
-    mat_spec.frag_shader = Path{ASSET_DIRECTORY} / "shaders/bin/light_frag.spv";
-    lights_material = Material{mat_spec}; // Color
-    lights_material.build(_device, _descriptor_pool, _render_pass, _window_dims,
-                          _deallocator);
-  }
-
-  { // Geometry
-    MaterialSpec mat_spec{};
-    geometry_material = Material{mat_spec}; // Color
-    geometry_material.build(_device, _descriptor_pool, _render_pass,
-                            _window_dims, _deallocator);
-  }
-
   { // Shadow pass
     MaterialSpec mat_spec{};
+    mat_spec.color_attachment_count = 1;
     mat_spec.vert_shader =
         Path{ASSET_DIRECTORY} / "shaders/bin/shadow_map_vert.spv",
     mat_spec.frag_shader =
         Path{ASSET_DIRECTORY} / "shaders/bin/shadow_map_frag.spv",
+    mat_spec.bindings = DEFAULT_BINDINGS;
     mat_spec.input_attributes =
         std::vector<VkFormat>{VK_FORMAT_R32G32B32_SFLOAT}; // Color
 
@@ -223,6 +292,153 @@ bool Renderer::init_cmd_buffer() {
   return true;
 }
 
+bool Renderer::init_deferred_pass() {
+  VkSamplerCreateInfo sampler_info = vk_struct_init::get_sampler_create_info(
+      VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
+  VK_CHECK(vkCreateSampler(_device, &sampler_info, nullptr, &g_buffer.sampler),
+           "Failed to create sampler");
+
+  _deallocator.push(
+      [&] { vkDestroySampler(_device, g_buffer.sampler, nullptr); });
+
+  // G buffer
+  VkImageCreateInfo image_info = vk_struct_init::get_image_create_info(
+      g_buffer.buffer_format,
+      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+      VkExtent3D{_window_dims.width, _window_dims.height, 1}, VK_IMAGE_TYPE_2D);
+
+  VkImageViewCreateInfo image_view_info =
+      vk_struct_init::get_image_view_create_info(
+          nullptr, g_buffer.buffer_format, VK_IMAGE_ASPECT_COLOR_BIT,
+          VK_IMAGE_VIEW_TYPE_2D);
+
+  VmaAllocationCreateInfo alloc_info = vk_struct_init::get_allocation_info(
+      VMA_MEMORY_USAGE_GPU_ONLY, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+  g_buffer.normal_buffer = ImageAllocation::create(
+      image_info, image_view_info, alloc_info, _device, _allocator);
+  g_buffer.position_buffer = ImageAllocation::create(
+      image_info, image_view_info, alloc_info, _device, _allocator);
+  g_buffer.albedo_buffer = ImageAllocation::create(
+      image_info, image_view_info, alloc_info, _device, _allocator);
+
+  g_buffer.depth_buffer = ImageAllocation::create(
+      g_buffer.depth_format,
+      VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+      VkExtent3D{_window_dims.width, _window_dims.height, 1}, VK_IMAGE_TYPE_2D,
+      VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_VIEW_TYPE_2D,
+      VMA_MEMORY_USAGE_GPU_ONLY, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, _device,
+      _allocator);
+
+  _deallocator.push([=] {
+    g_buffer.normal_buffer.destroy();
+    g_buffer.position_buffer.destroy();
+    g_buffer.albedo_buffer.destroy();
+    g_buffer.depth_buffer.destroy();
+  });
+
+  std::vector<VkAttachmentReference> attachment_references = {
+      {0, g_buffer.buffer_layout},
+      {1, g_buffer.buffer_layout},
+      {2, g_buffer.buffer_layout},
+  };
+
+  VkAttachmentReference depth_attachment_reference = {3, g_buffer.depth_layout};
+
+  std::vector<VkAttachmentDescription> attachment_descriptions(4);
+  for (int i = 0; i < 3; i++) {
+    attachment_descriptions[i] = vk_struct_init::get_attachment_description(
+        g_buffer.buffer_format,           //
+        VK_SAMPLE_COUNT_1_BIT,            //
+        VK_ATTACHMENT_LOAD_OP_CLEAR,      //
+        VK_ATTACHMENT_STORE_OP_STORE,     //
+        VK_ATTACHMENT_LOAD_OP_DONT_CARE,  //
+        VK_ATTACHMENT_STORE_OP_DONT_CARE, //
+        VK_IMAGE_LAYOUT_UNDEFINED,        //
+        g_buffer.buffer_layout            //
+    );
+  }
+
+  attachment_descriptions[3] = vk_struct_init::get_attachment_description(
+      g_buffer.depth_format,            //
+      VK_SAMPLE_COUNT_1_BIT,            //
+      VK_ATTACHMENT_LOAD_OP_CLEAR,      //
+      VK_ATTACHMENT_STORE_OP_STORE,     //
+      VK_ATTACHMENT_LOAD_OP_LOAD,       //
+      VK_ATTACHMENT_STORE_OP_DONT_CARE, //
+      VK_IMAGE_LAYOUT_UNDEFINED,        //
+      g_buffer.depth_layout             //
+  );
+
+  VkSubpassDependency prev_subpass_dep = vk_struct_init::get_subpass_dependency(
+      VK_SUBPASS_EXTERNAL, //
+      0,                   //
+      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, //
+      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+      VK_ACCESS_SHADER_WRITE_BIT, //
+      VK_DEPENDENCY_BY_REGION_BIT);
+
+  VkSubpassDependency next_subpass_dep = vk_struct_init::get_subpass_dependency(
+      0,
+      VK_SUBPASS_EXTERNAL, //
+      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+      VK_ACCESS_SHADER_WRITE_BIT, //
+      VK_DEPENDENCY_BY_REGION_BIT);
+
+  VkSubpassDependency subpass_dependencies[2] = {prev_subpass_dep,
+                                                 next_subpass_dep};
+
+  VkSubpassDescription subpass_description =
+      vk_struct_init::get_subpass_description(
+          0,                                                          //
+          VK_PIPELINE_BIND_POINT_GRAPHICS,                            //
+          0, nullptr,                                                 //
+          attachment_references.size(), attachment_references.data(), //
+          nullptr,
+          &depth_attachment_reference, //
+          0, nullptr);
+
+  VkRenderPassCreateInfo render_pass_info =
+      vk_struct_init::get_create_render_pass_info(
+          0,                              //
+          attachment_descriptions.size(), //
+          attachment_descriptions.data(), //
+          1, &subpass_description,        //
+          2, subpass_dependencies);
+
+  VK_CHECK(vkCreateRenderPass(_device, &render_pass_info, nullptr,
+                              &g_buffer.render_pass),
+           "Failed to create renderpass");
+
+  _deallocator.push(
+      [=]() { vkDestroyRenderPass(_device, g_buffer.render_pass, nullptr); });
+
+  std::vector<VkImageView> attachments = {
+      g_buffer.normal_buffer.view, g_buffer.position_buffer.view,
+      g_buffer.albedo_buffer.view, g_buffer.depth_buffer.view};
+
+  VkFramebufferCreateInfo fb_info = {};
+  fb_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+  fb_info.pNext = nullptr;
+  fb_info.renderPass = g_buffer.render_pass;
+  fb_info.width = _window_dims.width;
+  fb_info.height = _window_dims.height;
+  fb_info.layers = 1;
+  fb_info.attachmentCount = attachments.size();
+  fb_info.pAttachments = attachments.data();
+
+  VK_CHECK(
+      vkCreateFramebuffer(_device, &fb_info, nullptr, &g_buffer.framebuffer),
+      "Failed to create G-buffer framebuffer");
+  _deallocator.push(
+      [=]() { vkDestroyFramebuffer(_device, g_buffer.framebuffer, nullptr); });
+
+  return true;
+}
+
 bool Renderer::init_renderpass() {
   VkAttachmentDescription color_attachment =
       vk_struct_init::get_attachment_description(
@@ -285,7 +501,8 @@ bool Renderer::init_renderpass() {
           VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
       VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
           VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
-      // Can't start writing to depth attachment until previous subpass is done
+      // Can't start writing to depth attachment until previous subpass is
+      // done
       0,
       VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, //
       0);
@@ -385,7 +602,7 @@ bool Renderer::init_sync_primitives() {
 bool Renderer::init_descriptor_pool() {
   VkDescriptorPoolCreateInfo pool_info = {};
 
-  VkDescriptorPoolSize scene = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 200};
+  VkDescriptorPoolSize scene = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 500};
   VkDescriptorPoolSize material = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                                    100};
 
@@ -586,13 +803,16 @@ bool Renderer::begin_render_pass(VkRenderPass &render_pass,
                                  VkCommandBuffer &command_buffer,
                                  const VkExtent2D &extent,
                                  float depth_clear_value,
-                                 float color_clear_value) {
+                                 float *color_clear_values,
+                                 int color_clear_values_count) {
   std::vector<VkClearValue> clear_values;
-  if (color_clear_value >= 0.0f) {
-    VkClearValue clear_value{};
-    clear_value.color = {
-        {color_clear_value, color_clear_value, color_clear_value, 1.0f}};
-    clear_values.push_back(clear_value);
+  if (color_clear_values_count >= 0) {
+    for (int i = 0; i < color_clear_values_count; i++) {
+      VkClearValue clear_value{};
+      clear_value.color = {{color_clear_values[i], color_clear_values[i],
+                            color_clear_values[i], 1.0f}};
+      clear_values.push_back(clear_value);
+    }
   }
 
   if (depth_clear_value >= 0.0f) {
@@ -745,7 +965,6 @@ void Renderer::transfer_texture_to_gpu(Texture::Ptr p_texture) {
 }
 
 bool Renderer::init_shadow_map() {
-
   VkSamplerCreateInfo sampler_info = vk_struct_init::get_sampler_create_info(
       VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
   VK_CHECK(
@@ -827,7 +1046,7 @@ bool Renderer::init_shadow_map() {
       vk_struct_init::get_create_render_pass_info(0,                    //
                                                   1, &depth_attachment, //
                                                   1, &subpass,          //
-                                                  1, subpass_dependencies);
+                                                  2, subpass_dependencies);
   VK_CHECK(vkCreateRenderPass(_device, &render_pass_info, nullptr,
                               &_shadow_pass.render_pass),
            "Failed to create renderpass");
@@ -910,38 +1129,41 @@ bool Renderer::draw() {
 
   begin_command_buffer(_command_buffer);
 
-  begin_render_pass(
-      _shadow_pass.render_pass, _shadow_pass.framebuffer, _command_buffer,
-      VkExtent2D{SHADOW_ATLAS_RESOLUTION, SHADOW_ATLAS_RESOLUTION}, 1.0f,
-      -1.0f);
+  render_shadow_maps(_command_buffer);
+  render_g_buffer(_command_buffer);
 
-  shadow_material.bind_descriptor_buffer(1, 0, _camera_buffer);
-  shadow_material.bind_descriptor_buffer(1, 1, _light_buffer);
+  render_composite(_command_buffer);
 
-  render_scene(_command_buffer, true);
-
-  end_render_pass(_command_buffer);
-
-  begin_render_pass(_render_pass, _framebuffers[_swapchain_img_idx],
-                    _command_buffer, _window_dims, 1.0f, 0.0f);
-
-  geometry_material.bind_descriptor_buffer(1, 0, _camera_buffer);
-  geometry_material.bind_descriptor_buffer(1, 1, _light_buffer);
-  geometry_material.ds_allocator.bind_image(1, 2, _shadow_pass.image_allocation,
-                                            _shadow_pass.layout,
-                                            _shadow_pass.sampler);
-  lights_material.bind_descriptor_buffer(1, 0, _camera_buffer);
-  lights_material.bind_descriptor_buffer(1, 1, _light_buffer);
-
-  render_scene(_command_buffer, false);
-
-  debug_material.bind_descriptor_buffer(0, 0, _camera_buffer);
-  render_debug(_command_buffer);
-
-  end_render_pass(_command_buffer);
   submit_command_buffer(_command_buffer);
   _frame_number++;
   return true;
+}
+
+void Renderer::change_image_layout(
+    VkImage &image, VkImageLayout old_layout, VkImageLayout new_layout,
+    VkAccessFlags src_access_flag, VkAccessFlags dst_access_flag,
+    VkPipelineStageFlags src_stage, VkPipelineStageFlags dst_stage,
+    VkImageAspectFlags aspect_mask, VkCommandBuffer command_buffer) {
+  VkImageSubresourceRange range;
+  range.aspectMask = aspect_mask;
+  range.baseMipLevel = 0;
+  range.levelCount = 1;
+  range.baseArrayLayer = 0;
+  range.layerCount = 1;
+
+  VkImageMemoryBarrier barrier_info = {};
+  barrier_info.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  barrier_info.image = image;
+  barrier_info.subresourceRange = range;
+
+  barrier_info.oldLayout = old_layout;
+  barrier_info.newLayout = new_layout;
+
+  barrier_info.srcAccessMask = src_access_flag;
+  barrier_info.dstAccessMask = dst_access_flag;
+
+  vkCmdPipelineBarrier(command_buffer, src_stage, dst_stage, 0, 0, nullptr, 0,
+                       nullptr, 1, &barrier_info);
 }
 
 void Renderer::bind_textures() {
@@ -966,27 +1188,26 @@ void Renderer::bind_textures() {
     image_infos[valid_texture_count + i].sampler = dummy_texture->sampler;
   }
 
-  geometry_material.ds_allocator.bind_image_infos(0, 0, image_infos);
-  shadow_material.ds_allocator.bind_image_infos(0, 0, image_infos);
+  composite_pass_material.ds_allocator.bind_image_infos(0, 0, image_infos);
+  g_buffer.material.ds_allocator.bind_image_infos(0, 0, image_infos);
 }
 
-void Renderer::render_scene(VkCommandBuffer &command_buffer, bool shadow_pass) {
+void Renderer::render_shadow_maps(VkCommandBuffer &command_buffer) {
+  begin_render_pass(
+      _shadow_pass.render_pass, _shadow_pass.framebuffer, _command_buffer,
+      VkExtent2D{SHADOW_ATLAS_RESOLUTION, SHADOW_ATLAS_RESOLUTION}, 1.0f,
+      nullptr, 0);
+
+  shadow_material.bind_descriptor_buffer(1, 0, _camera_buffer);
+  shadow_material.bind_descriptor_buffer(1, 1, _light_buffer);
+
   rend::ECS::EntityRegistry &registry = rend::ECS::get_entity_registry();
 
   VkViewport viewport;
   VkRect2D scissor;
-  if (shadow_pass) {
-    viewport = {0, 0, SHADOW_MAP_RESOLUTION, SHADOW_MAP_RESOLUTION, 0, 1};
-    scissor = {0, 0, SHADOW_MAP_RESOLUTION, SHADOW_MAP_RESOLUTION};
-  } else {
-    viewport = {0,
-                0,
-                static_cast<float>(_window_dims.width),
-                static_cast<float>(_window_dims.height),
-                0,
-                1};
-    scissor = {0, 0, _window_dims.width, _window_dims.height};
-  }
+
+  viewport = {0, 0, SHADOW_MAP_RESOLUTION, SHADOW_MAP_RESOLUTION, 0, 1};
+  scissor = {0, 0, SHADOW_MAP_RESOLUTION, SHADOW_MAP_RESOLUTION};
 
   for (rend::ECS::EntityRegistry::ArchetypeIterator rb_iterator =
            registry.archetype_iterator<Renderable, Transform>();
@@ -994,13 +1215,7 @@ void Renderer::render_scene(VkCommandBuffer &command_buffer, bool shadow_pass) {
     rend::ECS::EID eid = *rb_iterator;
 
     Renderable &renderable = registry.get_component<Renderable>(eid);
-    if (renderable.type == RenderableType::Light && shadow_pass) {
-      continue;
-    }
-    Material &material = shadow_pass ? shadow_material
-                         : renderable.type == RenderableType::Geometry
-                             ? geometry_material
-                             : lights_material;
+    Material &material = shadow_material;
     Mesh::Ptr mesh = renderable.p_mesh;
 
     Transform &transform = registry.get_component<Transform>(eid);
@@ -1021,48 +1236,183 @@ void Renderer::render_scene(VkCommandBuffer &command_buffer, bool shadow_pass) {
     PushConstants constants;
     Eigen::Matrix4f model = transform.get_model_matrix();
     Eigen::Matrix4f::Map(constants.model) = model;
-    constants.texture_idx = texture_to_index[renderable.p_texture.get()];
+    constants.texture_idx = texture_to_index[renderable.p_texture.get()] + 1;
     constants.light_index = 0;
 
-    if (shadow_pass) {
-      for (int light_idx = 0; light_idx < lights.size(); light_idx++) {
-        if (!lights[light_idx].enabled()) {
-          continue;
-        }
-        int light_x = light_idx % SHADOW_ATLAS_LIGHTS_PER_ROW;
-        int light_y = light_idx / SHADOW_ATLAS_LIGHTS_PER_ROW;
-
-        viewport = {static_cast<float>(light_x * SHADOW_MAP_RESOLUTION),
-                    static_cast<float>(light_y * SHADOW_MAP_RESOLUTION),
-                    SHADOW_MAP_RESOLUTION,
-                    SHADOW_MAP_RESOLUTION,
-                    0,
-                    1};
-        scissor = {light_x * SHADOW_MAP_RESOLUTION,
-                   light_y * SHADOW_MAP_RESOLUTION, SHADOW_MAP_RESOLUTION,
-                   SHADOW_MAP_RESOLUTION};
-
-        vkCmdSetViewport(_command_buffer, 0, 1, &viewport);
-        vkCmdSetScissor(_command_buffer, 0, 1, &scissor);
-
-        constants.light_index = light_idx;
-        vkCmdPushConstants(command_buffer, material.pipeline_layout,
-                           material.spec.push_constants_description.stageFlags,
-                           0, sizeof(PushConstants), &constants);
-        vkCmdDraw(command_buffer, renderable.p_mesh->vertex_count(), 1, 0, 0);
+    for (int light_idx = 0; light_idx < lights.size(); light_idx++) {
+      if (!lights[light_idx].enabled()) {
+        continue;
       }
-    } else {
+      int light_x = light_idx % SHADOW_ATLAS_LIGHTS_PER_ROW;
+      int light_y = light_idx / SHADOW_ATLAS_LIGHTS_PER_ROW;
+
+      viewport = {static_cast<float>(light_x * SHADOW_MAP_RESOLUTION),
+                  static_cast<float>(light_y * SHADOW_MAP_RESOLUTION),
+                  SHADOW_MAP_RESOLUTION,
+                  SHADOW_MAP_RESOLUTION,
+                  0,
+                  1};
+      scissor = {light_x * SHADOW_MAP_RESOLUTION,
+                 light_y * SHADOW_MAP_RESOLUTION, SHADOW_MAP_RESOLUTION,
+                 SHADOW_MAP_RESOLUTION};
+
       vkCmdSetViewport(_command_buffer, 0, 1, &viewport);
       vkCmdSetScissor(_command_buffer, 0, 1, &scissor);
+
+      constants.light_index = light_idx;
       vkCmdPushConstants(command_buffer, material.pipeline_layout,
                          material.spec.push_constants_description.stageFlags, 0,
                          sizeof(PushConstants), &constants);
       vkCmdDraw(command_buffer, renderable.p_mesh->vertex_count(), 1, 0, 0);
     }
   }
+
+  end_render_pass(_command_buffer);
+}
+
+void Renderer::render_g_buffer(VkCommandBuffer &command_buffer) {
+  float clear_values[3] = {0.0f, 0.0f, 0.0f};
+  begin_render_pass(g_buffer.render_pass, g_buffer.framebuffer, command_buffer,
+                    _window_dims, 1.0f, clear_values, 3);
+
+  rend::ECS::EntityRegistry &registry = rend::ECS::get_entity_registry();
+
+  VkViewport viewport{0,
+                      0,
+                      static_cast<float>(_window_dims.width),
+                      static_cast<float>(_window_dims.height),
+                      0,
+                      1};
+  VkRect2D scissor{0, 0, _window_dims.width, _window_dims.height};
+
+  g_buffer.material.bind_descriptor_buffer(1, 0, _camera_buffer);
+
+  for (rend::ECS::EntityRegistry::ArchetypeIterator rb_iterator =
+           registry.archetype_iterator<Renderable, Transform>();
+       rb_iterator.valid(); ++rb_iterator) {
+    rend::ECS::EID eid = *rb_iterator;
+
+    Renderable &renderable = registry.get_component<Renderable>(eid);
+
+    Material &material = g_buffer.material;
+    Mesh::Ptr mesh = renderable.p_mesh;
+
+    Transform &transform = registry.get_component<Transform>(eid);
+
+    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      material.pipeline);
+
+    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            material.pipeline_layout, 0,
+                            material.ds_allocator.descriptor_sets.size(),
+                            material.ds_allocator.descriptor_sets.data(), 0,
+                            nullptr);
+
+    VkDeviceSize offset = 0;
+    vkCmdBindVertexBuffers(command_buffer, 0, 1,
+                           &mesh->buffer_allocation.buffer, &offset);
+
+    PushConstants constants;
+    Eigen::Matrix4f model = transform.get_model_matrix();
+    Eigen::Matrix4f::Map(constants.model) = model;
+    constants.texture_idx = texture_to_index[renderable.p_texture.get()] + 1;
+    constants.light_index = 0;
+
+    vkCmdSetViewport(command_buffer, 0, 1, &viewport);
+    vkCmdSetScissor(command_buffer, 0, 1, &scissor);
+    vkCmdPushConstants(command_buffer, material.pipeline_layout,
+                       material.spec.push_constants_description.stageFlags, 0,
+                       sizeof(PushConstants), &constants);
+    vkCmdDraw(command_buffer, renderable.p_mesh->vertex_count(), 1, 0, 0);
+  }
+  end_render_pass(command_buffer);
+}
+
+void Renderer::render_composite(VkCommandBuffer &command_buffer) {
+  // Switch layouts before composite pass
+  change_image_layout(
+      g_buffer.normal_buffer.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_IMAGE_ASPECT_COLOR_BIT,
+      _command_buffer);
+
+  change_image_layout(
+      g_buffer.position_buffer.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_IMAGE_ASPECT_COLOR_BIT,
+      _command_buffer);
+
+  change_image_layout(
+      g_buffer.albedo_buffer.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_IMAGE_ASPECT_COLOR_BIT,
+      _command_buffer);
+
+  change_image_layout(g_buffer.depth_buffer.image,
+                      VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                      VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+                      VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                      VK_ACCESS_SHADER_READ_BIT,
+                      VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+                      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                      VK_IMAGE_ASPECT_DEPTH_BIT, _command_buffer);
+
+  float clear_value = 0.0f;
+  begin_render_pass(_render_pass, _framebuffers[_swapchain_img_idx],
+                    command_buffer, _window_dims, 1.0f, &clear_value, 1);
+
+  composite_pass_material.bind_descriptor_buffer(1, 0, _camera_buffer);
+  composite_pass_material.bind_descriptor_buffer(1, 1, _light_buffer);
+  composite_pass_material.ds_allocator.bind_image(
+      1, 2, _shadow_pass.image_allocation, _shadow_pass.layout,
+      _shadow_pass.sampler);
+  composite_pass_material.ds_allocator.bind_image(
+      1, 3, g_buffer.normal_buffer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+      g_buffer.sampler);
+  composite_pass_material.ds_allocator.bind_image(
+      1, 4, g_buffer.position_buffer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+      g_buffer.sampler);
+  composite_pass_material.ds_allocator.bind_image(
+      1, 5, g_buffer.albedo_buffer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+      g_buffer.sampler);
+  composite_pass_material.ds_allocator.bind_image(
+      1, 6, g_buffer.depth_buffer,
+      VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, g_buffer.sampler);
+
+  rend::ECS::EntityRegistry &registry = rend::ECS::get_entity_registry();
+
+  VkViewport viewport{0,
+                      0,
+                      static_cast<float>(_window_dims.width),
+                      static_cast<float>(_window_dims.height),
+                      0,
+                      1};
+  VkRect2D scissor{0, 0, _window_dims.width, _window_dims.height};
+  vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    composite_pass_material.pipeline);
+  vkCmdBindDescriptorSets(
+      command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+      composite_pass_material.pipeline_layout, 0,
+      composite_pass_material.ds_allocator.descriptor_sets.size(),
+      composite_pass_material.ds_allocator.descriptor_sets.data(), 0, nullptr);
+
+  vkCmdSetViewport(_command_buffer, 0, 1, &viewport);
+  vkCmdSetScissor(_command_buffer, 0, 1, &scissor);
+  vkCmdDraw(command_buffer, 3, 1, 0, 0);
+
+  render_debug(_command_buffer);
+
+  end_render_pass(_command_buffer);
 }
 
 void Renderer::render_debug(VkCommandBuffer &command_buffer) {
+  debug_material.bind_descriptor_buffer(0, 0, _camera_buffer);
   if (debug_renderable.debug_verts_to_draw == 0) {
     return;
   }

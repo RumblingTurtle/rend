@@ -7,8 +7,8 @@
 
 #include <rend/Audio/AudioPlayer.h>
 #include <rend/EntityRegistry.h>
-#include <rend/Physics/PhysicsSystem.h>
-#include <rend/Rendering/Vulkan/DebugBufferFillSystem.h>
+#include <rend/Systems/DebugBufferFillSystem.h>
+#include <rend/Systems/PhysicsSystem.h>
 
 #include <rend/InputHandler.h>
 

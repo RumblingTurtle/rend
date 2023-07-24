@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <functional>
 #include <iostream>
+#include <rend/Rendering/Vulkan/vk_struct_init.h>
 #include <vector>
 #include <vk_mem_alloc.h>
 #include <vulkan/vulkan.h>
@@ -99,6 +100,50 @@ struct ImageAllocation {
     if (image_result != VK_SUCCESS) {
       throw std::runtime_error("ImageAllocation: Failed to create image");
     }
+    image_view_create_info.image = image_allocation.image;
+    VkResult image_view_result = vkCreateImageView(
+        device, &image_view_create_info, nullptr, &image_allocation.view);
+
+    if (image_view_result != VK_SUCCESS) {
+      throw std::runtime_error("ImageAllocation: Failed to create image view");
+    }
+
+    image_allocation.buffer_allocated = true;
+    return image_allocation;
+  }
+
+  static ImageAllocation create(VkFormat format, VkImageUsageFlags usage,
+                                VkExtent3D extent, VkImageType type,
+                                VkImageAspectFlags aspect_flags,
+                                VkImageViewType view_type,
+                                VmaMemoryUsage vma_usage,
+                                VmaAllocationCreateFlags vma_allocation_flags,
+                                VkDevice device, VmaAllocator allocator) {
+
+    VkImageCreateInfo image_create_info =
+        vk_struct_init::get_image_create_info(format, usage, extent, type);
+
+    VkImageViewCreateInfo image_view_create_info =
+        vk_struct_init::get_image_view_create_info(
+            nullptr, format, aspect_flags,
+            view_type); // Image arg will be substituted from
+                        // image_infos image field
+
+    VmaAllocationCreateInfo allocation_info =
+        vk_struct_init::get_allocation_info(vma_usage, vma_allocation_flags);
+
+    ImageAllocation image_allocation;
+    image_allocation.device = device;
+    image_allocation.allocator = allocator;
+    image_allocation.format = image_create_info.format;
+
+    VkResult image_result = vmaCreateImage(
+        allocator, &image_create_info, &allocation_info,
+        &image_allocation.image, &image_allocation.allocation, nullptr);
+    if (image_result != VK_SUCCESS) {
+      throw std::runtime_error("ImageAllocation: Failed to create image");
+    }
+
     image_view_create_info.image = image_allocation.image;
     VkResult image_view_result = vkCreateImageView(
         device, &image_view_create_info, nullptr, &image_allocation.view);

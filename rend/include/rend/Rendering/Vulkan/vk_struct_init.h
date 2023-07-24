@@ -1,4 +1,5 @@
 #pragma once
+#include <vk_mem_alloc.h>
 #include <vulkan/vulkan.h>
 
 /**
@@ -6,7 +7,7 @@
  * This should be the first place to look when you start to have issues
  * Filler functions have to:
  *  1)Fill all the fileds of the struct
- *  2)USE NO HARDCODED DEFAULTS (although currently there are some which will be
+ *  2)NO HARDCODED DEFAULTS (although currently there are some which will be
  * removed )
  */
 namespace vk_struct_init {

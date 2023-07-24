@@ -9,9 +9,10 @@ layout(set = 0, binding = 0) uniform CameraData {
   mat4 projection;
   vec4 position;
 }
-c_data;
+camera_info;
 
 void main() {
-  gl_Position = c_data.projection * c_data.view * vec4(vert_pos, 1.0f);
+  gl_Position =
+      camera_info.projection * camera_info.view * vec4(vert_pos, 1.0f);
   out_vert_color = vert_color;
 }

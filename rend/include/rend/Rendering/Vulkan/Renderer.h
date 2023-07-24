@@ -44,6 +44,7 @@ class Renderer {
   // Swapchain
   VkSwapchainKHR _swapchain;
   VkFormat _swapchain_image_format;
+
   std::vector<VkImage> _swapchain_images;
   std::vector<VkImageView> _swapchain_image_views;
   uint32_t _swapchain_img_idx; // Current swapchain image index
@@ -96,9 +97,28 @@ class Renderer {
   BufferAllocation _light_buffer;
 
 public:
+  struct {
+    ImageAllocation normal_buffer;
+    ImageAllocation position_buffer;
+    ImageAllocation albedo_buffer;
+    ImageAllocation depth_buffer;
+
+    VkFramebuffer framebuffer;
+    VkRenderPass render_pass;
+    VkSampler sampler;
+
+    VkFormat depth_format = VK_FORMAT_D32_SFLOAT;
+    VkFormat buffer_format = VK_FORMAT_R32G32B32A32_SFLOAT;
+
+    VkImageLayout buffer_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    VkImageLayout depth_layout =
+        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    Material material;
+  } g_buffer;
+
+  Material composite_pass_material;
   Material debug_material;
-  Material geometry_material;
-  Material lights_material;
   Material shadow_material;
 
   struct DebugVertex {
@@ -168,23 +188,34 @@ public:
   bool begin_render_pass(VkRenderPass &render_pass, VkFramebuffer &framebuffer,
                          VkCommandBuffer &command_buffer,
                          const VkExtent2D &extent, float depth_clear_value,
-                         float color_clear_value);
+                         float *color_clear_values,
+                         int color_clear_values_count);
   void end_render_pass(VkCommandBuffer &command_buffer);
 
   bool begin_command_buffer(VkCommandBuffer &command_buffer);
   bool submit_command_buffer(VkCommandBuffer &command_buffer);
 
-  void render_scene(VkCommandBuffer &command_buffer, bool shadow_pass);
+  void render_shadow_maps(VkCommandBuffer &command_buffer);
+  void render_g_buffer(VkCommandBuffer &command_buffer);
+  void render_composite(VkCommandBuffer &command_buffer);
   void render_debug(VkCommandBuffer &command_buffer);
 
   bool begin_shadow_pass();
   bool end_shadow_pass();
+
+  void change_image_layout(
+      VkImage &image, VkImageLayout old_layout, VkImageLayout new_layout,
+      VkAccessFlags src_access_flag, VkAccessFlags dst_access_flag,
+      VkPipelineStageFlags src_stage, VkPipelineStageFlags dst_stage,
+      VkImageAspectFlags aspect_mask, VkCommandBuffer command_buffer);
 
   bool draw();
 
   void cleanup();
 
   bool init_shadow_map();
+
+  bool init_deferred_pass();
 
   // Debugging primitive drawing
   void draw_debug_line(const Eigen::Vector3f &start, const Eigen::Vector3f &end,

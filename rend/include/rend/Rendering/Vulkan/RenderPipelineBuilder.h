@@ -9,18 +9,16 @@
 
 class RenderPipelineBuilder {
   VertexInfoDescription _vertex_info_description{};
-  std::vector<VkPipelineShaderStageCreateInfo> _shaderStages{};
+  std::vector<VkPipelineShaderStageCreateInfo> _shader_stages{};
   VkPipelineVertexInputStateCreateInfo _vertex_input_info{};
   VkPipelineInputAssemblyStateCreateInfo _input_assembly{};
   VkPipelineRasterizationStateCreateInfo _rasterizer{};
-  VkPipelineColorBlendAttachmentState _color_blend_attachment{};
+  std::vector<VkPipelineColorBlendAttachmentState> _color_blend_attachments;
   VkPipelineMultisampleStateCreateInfo _multisampling{};
   VkPipelineColorBlendStateCreateInfo _color_blending{};
-  VkPipelineViewportStateCreateInfo _viewportState{};
+  VkPipelineViewportStateCreateInfo _viewport_state{};
   VkPipelineDepthStencilStateCreateInfo _depth_stencil_create_info{};
   VkPipelineLayoutCreateInfo pipeline_layout_info{};
-  VkViewport _viewport;
-  VkRect2D _scissor;
 
 public:
   void build_pipeline_layout(VkDevice &_device,
@@ -39,9 +37,10 @@ public:
   }
 
   void build_pipeline(VkDevice &device, VkRenderPass &render_pass,
-                      Shader &shader, VkPipelineLayout &_pipeline_layout,
+                      Shader &shader, VkPipelineLayout &pipeline_layout,
                       VertexInfoDescription vertex_info_description,
-                      VkPrimitiveTopology topology, VkPipeline &newPipeline) {
+                      VkPrimitiveTopology topology, VkPipeline &new_pipeline,
+                      int color_attachment_count) {
     _vertex_info_description = vertex_info_description;
     _depth_stencil_create_info = vk_struct_init::get_depth_stencil_create_info(
         true, true, VK_COMPARE_OP_LESS_OR_EQUAL);
@@ -50,10 +49,10 @@ public:
     // Configure the rasterizer to draw filled triangles
     set_rasterization_state_create_info(VK_POLYGON_MODE_FILL);
     // a single blend attachment with no blending and writing to RGBA
-    set_color_blend_attachment_state();
     // we don't use multisampling, so just run the default one
     set_multisampling_state_create_info();
-    set_color_blending_info();
+
+    set_color_blending_info(color_attachment_count);
 
     VkDynamicState dynamicState[2] = {VK_DYNAMIC_STATE_VIEWPORT,
                                       VK_DYNAMIC_STATE_SCISSOR};
@@ -63,42 +62,56 @@ public:
     dynamicStateCreateInfo.dynamicStateCount = 2;
     dynamicStateCreateInfo.pDynamicStates = dynamicState;
 
-    _viewportState.sType =
+    _viewport_state.sType =
         VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    _viewportState.pViewports = nullptr;
-    _viewportState.viewportCount = 1;
-    _viewportState.scissorCount = 1;
+    _viewport_state.pViewports = nullptr;
+    _viewport_state.viewportCount = 1;
+    _viewport_state.scissorCount = 1;
 
-    _shaderStages.clear();
-    _shaderStages.push_back(shader.get_vertex_shader_stage_info());
-    _shaderStages.push_back(shader.get_fragment_shader_stage_info());
+    _shader_stages.clear();
+    _shader_stages.push_back(shader.get_vertex_shader_stage_info());
+    _shader_stages.push_back(shader.get_fragment_shader_stage_info());
 
     VkGraphicsPipelineCreateInfo pipelineInfo = {};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
     pipelineInfo.pNext = nullptr;
-    pipelineInfo.stageCount = _shaderStages.size();
-    pipelineInfo.pStages = _shaderStages.data();
+    pipelineInfo.stageCount = _shader_stages.size();
+    pipelineInfo.pStages = _shader_stages.data();
     pipelineInfo.pVertexInputState = &_vertex_input_info;
     pipelineInfo.pInputAssemblyState = &_input_assembly;
     pipelineInfo.pRasterizationState = &_rasterizer;
     pipelineInfo.pMultisampleState = &_multisampling;
     pipelineInfo.pColorBlendState = &_color_blending;
     pipelineInfo.pDepthStencilState = &_depth_stencil_create_info;
-    pipelineInfo.layout = _pipeline_layout;
+    pipelineInfo.layout = pipeline_layout;
     pipelineInfo.renderPass = render_pass;
     pipelineInfo.subpass = 0;
     pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
-    pipelineInfo.pViewportState = &_viewportState;
+    pipelineInfo.pViewportState = &_viewport_state;
     pipelineInfo.pDynamicState = &dynamicStateCreateInfo;
 
     if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo,
-                                  nullptr, &newPipeline) != VK_SUCCESS) {
+                                  nullptr, &new_pipeline) != VK_SUCCESS) {
       std::cerr << "failed to create pipeline" << std::endl;
-      newPipeline = VK_NULL_HANDLE;
+      new_pipeline = VK_NULL_HANDLE;
     }
   }
 
-  void set_color_blending_info() {
+  void set_color_blending_info(int color_attachment_count) {
+    _color_blend_attachments.resize(color_attachment_count);
+    for (auto &attachment : _color_blend_attachments) {
+      attachment.colorWriteMask =
+          VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+          VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+      attachment.blendEnable = VK_TRUE;
+
+      attachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+      attachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+      attachment.colorBlendOp = VK_BLEND_OP_ADD;
+      attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+      attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+    }
+
     // setup dummy color blending. We aren't using transparent objects yet
     // the blending is just "no blend", but we do write to the color attachment
     _color_blending.sType =
@@ -107,8 +120,8 @@ public:
     _color_blending.pNext = nullptr;
     _color_blending.logicOpEnable = VK_FALSE;
     _color_blending.logicOp = VK_LOGIC_OP_COPY;
-    _color_blending.attachmentCount = 1;
-    _color_blending.pAttachments = &_color_blend_attachment;
+    _color_blending.attachmentCount = _color_blend_attachments.size();
+    _color_blending.pAttachments = _color_blend_attachments.data();
   }
 
   // Shader inputs for a pipeline
@@ -190,19 +203,5 @@ public:
     _multisampling.pSampleMask = nullptr;
     _multisampling.alphaToCoverageEnable = VK_FALSE;
     _multisampling.alphaToOneEnable = VK_FALSE;
-  }
-
-  void set_color_blend_attachment_state() {
-    _color_blend_attachment.colorWriteMask =
-        VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-        VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    _color_blend_attachment.blendEnable = VK_TRUE;
-
-    _color_blend_attachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-    _color_blend_attachment.dstColorBlendFactor =
-        VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-    _color_blend_attachment.colorBlendOp = VK_BLEND_OP_ADD;
-    _color_blend_attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-    _color_blend_attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
   }
 };

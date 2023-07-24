@@ -6,7 +6,7 @@ layout(set = 1, binding = 0) uniform CameraData {
   mat4 view;
   mat4 projection;
 }
-c_data;
+camera_info;
 
 layout(push_constant) uniform PushConstants {
   mat4 model;

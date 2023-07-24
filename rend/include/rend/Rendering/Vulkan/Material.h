@@ -24,16 +24,22 @@ struct CameraInfo {
 
 constexpr int MAX_TEXTURE_COUNT = 20;
 static BindingMatrix DEFAULT_BINDINGS = {
-    {Binding{VK_SHADER_STAGE_FRAGMENT_BIT,
-             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 0,
-             MAX_TEXTURE_COUNT}}, // Textures
-    {Binding{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, sizeof(CameraInfo), 1},
-     Binding{VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT,
-             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, sizeof(LightSource),
-             MAX_LIGHTS}, // Camera info (view, projection)
-     Binding{VK_SHADER_STAGE_FRAGMENT_BIT,
-             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 0, 1}}}; // Shadow map
+    {Binding{VK_SHADER_STAGE_FRAGMENT_BIT,              //
+             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, //
+             0,                                         //
+             MAX_TEXTURE_COUNT}},                       // Textures
+    {Binding{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, //
+             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,                         //
+             sizeof(CameraInfo),                                        //
+             1},
+     Binding{VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, //
+             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,                         //
+             sizeof(LightSource),                                       //
+             MAX_LIGHTS},                  // Camera info (view, projection)
+     Binding{VK_SHADER_STAGE_FRAGMENT_BIT, //
+             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, //
+             0,                                         //
+             1}}};                                      // Shadow map
 
 static std::vector<VkFormat> DEFAULT_INPUT_LAYOUT = {
     VK_FORMAT_R32G32B32_SFLOAT, // Position
@@ -43,7 +49,7 @@ static std::vector<VkFormat> DEFAULT_INPUT_LAYOUT = {
 struct MaterialSpec {
   Path vert_shader;
   Path frag_shader;
-  BindingMatrix bindings = DEFAULT_BINDINGS;
+  BindingMatrix bindings;
   VkPrimitiveTopology topology_type = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
   int vertex_stride = -1;
   std::vector<VkFormat> input_attributes = DEFAULT_INPUT_LAYOUT;
@@ -52,6 +58,8 @@ struct MaterialSpec {
       0,                                                         //
       sizeof(PushConstants)                                      //
   };
+
+  int color_attachment_count;
 };
 
 class Material {
