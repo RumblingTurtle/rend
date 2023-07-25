@@ -8,4 +8,5 @@ struct Renderable {
   RenderableType type;
   Mesh::Ptr p_mesh;
   Texture::Ptr p_texture;
+  bool reflective = false;
 };

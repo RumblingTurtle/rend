@@ -27,14 +27,15 @@ enum class Primitive { DINGUS, BOX, SPHERE };
 
 ECS::EID create_primitive(Eigen::Vector3f position, Eigen::Quaternionf rotation,
                           Eigen::Vector3f scale, Texture::Ptr p_texture,
-                          Primitive primitive, bool static_body = false) {
+                          Primitive primitive, bool static_body = false,
+                          bool reflective = false) {
 
   rend::ECS::EntityRegistry &registry = rend::ECS::get_entity_registry();
   ECS::EID eid = registry.register_entity();
   Transform &transform = registry.add_component<Transform>(eid);
   Renderable &renderable = registry.add_component<Renderable>(eid);
   Rigidbody &rigidbody = registry.add_component<Rigidbody>(eid);
-
+  renderable.reflective = reflective;
   renderable.p_texture = p_texture;
   renderable.type = RenderableType::Geometry;
 
@@ -115,7 +116,7 @@ int main() {
   rend::ECS::EID floor_eid = create_primitive(
       Eigen::Vector3f{0, 0, 0}, Eigen::Quaternionf::Identity(),
       Eigen::Vector3f{50.0f, 1.0f, 50.0f}, Texture::get_error_texture(),
-      rend::Primitive::BOX, true);
+      rend::Primitive::BOX, true, true);
 
   // audio_player.play();
 

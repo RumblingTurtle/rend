@@ -77,6 +77,7 @@ class Renderer {
 public:
   RenderPass deferred_pass;
   RenderPass shadow_pass;
+  RenderPass screenspace_effects_pass;
 
   struct {
     std::vector<VkImage> images;
@@ -154,7 +155,7 @@ public:
                          VkCommandBuffer &command_buffer,
                          const VkExtent2D &extent, float depth_clear_value,
                          float *color_clear_values,
-                         int color_clear_values_count);
+                         int color_clear_values_count, float alpha_clear_value);
   void end_render_pass(VkCommandBuffer &command_buffer);
 
   bool begin_command_buffer(VkCommandBuffer &command_buffer);
@@ -162,6 +163,7 @@ public:
 
   void render_shadow_maps(VkCommandBuffer &command_buffer);
   void render_g_buffer(VkCommandBuffer &command_buffer);
+  void render_screenspace_effects(VkCommandBuffer &command_buffer);
   void render_composite(VkCommandBuffer &command_buffer);
   void render_debug(VkCommandBuffer &command_buffer);
 
@@ -178,9 +180,11 @@ public:
 
   void cleanup();
 
-  bool init_shadow_map();
+  bool init_shadow_pass();
 
   bool init_deferred_pass();
+
+  bool init_screenspace_pass();
 
   // Debugging primitive drawing
   void draw_debug_line(const Eigen::Vector3f &start, const Eigen::Vector3f &end,

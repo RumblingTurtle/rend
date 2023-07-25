@@ -34,7 +34,8 @@ bool Renderer::init() {
                  init_cmd_buffer() && init_renderpass() &&
                  init_framebuffers() && init_sync_primitives() &&
                  init_descriptor_pool() && init_debug_renderable() &&
-                 init_shadow_map() && init_deferred_pass() && init_materials();
+                 init_shadow_pass() && init_deferred_pass() &&
+                 init_screenspace_pass() && init_materials();
   return _initialized;
 }
 
@@ -131,6 +132,14 @@ bool Renderer::init_materials() {
                  VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,                         //
                  sizeof(LightSource),                                       //
                  MAX_LIGHTS},                                               //
+         Binding{VK_SHADER_STAGE_FRAGMENT_BIT,                              //
+                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,                 //
+                 0,                                                         //
+                 1},                                                        //
+         Binding{VK_SHADER_STAGE_FRAGMENT_BIT,                              //
+                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,                 //
+                 0,                                                         //
+                 1},                                                        //
          Binding{VK_SHADER_STAGE_FRAGMENT_BIT,                              //
                  VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,                 //
                  0,                                                         //
@@ -327,6 +336,92 @@ bool Renderer::init_deferred_pass() {
                                _deallocation_queue);
 
   _deallocation_queue.push([=] { deferred_pass.destroy(); });
+  return true;
+}
+
+bool Renderer::init_screenspace_pass() {
+  AttachmentSpec color_attachment;
+  color_attachment.active = true;
+  color_attachment.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+  color_attachment.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  color_attachment.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+  color_attachment.extent = _window_dims;
+  color_attachment.filter_mode = VK_FILTER_LINEAR;
+  color_attachment.address_mode = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+  color_attachment.usage =
+      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+
+  std::vector<AttachmentSpec> color_attachments = {color_attachment,
+                                                   color_attachment};
+
+  AttachmentSpec depth_attachment{};
+
+  MaterialSpec mat_spec{};
+  mat_spec.depth_test_enabled = false;
+  mat_spec.blend_test_enabled = false;
+  mat_spec.color_attachment_count = 2;
+  mat_spec.vert_shader =
+      Path{ASSET_DIRECTORY} / "shaders/bin/screenspace_vert.spv";
+  mat_spec.frag_shader =
+      Path{ASSET_DIRECTORY} / "shaders/bin/screenspace_frag.spv";
+  mat_spec.bindings = {
+      {Binding{VK_SHADER_STAGE_FRAGMENT_BIT,                              //
+               VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,                 //
+               0,                                                         //
+               MAX_TEXTURE_COUNT}},                                       //
+      {Binding{VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, //
+               VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,                         //
+               sizeof(CameraInfo),                                        //
+               1},                                                        //
+       Binding{VK_SHADER_STAGE_FRAGMENT_BIT,                              //
+               VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,                         //
+               sizeof(LightSource),                                       //
+               MAX_LIGHTS},                                               //
+       Binding{VK_SHADER_STAGE_FRAGMENT_BIT,                              //
+               VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,                 //
+               0,                                                         //
+               1},                                                        //
+       Binding{VK_SHADER_STAGE_FRAGMENT_BIT,                              //
+               VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,                 //
+               0,                                                         //
+               1},                                                        //
+       Binding{VK_SHADER_STAGE_FRAGMENT_BIT,                              //
+               VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,                 //
+               0,                                                         //
+               1},                                                        //
+       Binding{VK_SHADER_STAGE_FRAGMENT_BIT,                              //
+               VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,                 //
+               0,                                                         //
+               1},                                                        //
+       Binding{VK_SHADER_STAGE_FRAGMENT_BIT,                              //
+               VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,                 //
+               0,                                                         //
+               1}}};                                                      //
+
+  mat_spec.input_attributes = {};
+
+  RenderPassSpec pass_spec;
+  pass_spec.extent = _window_dims;
+  pass_spec.prev_stage_dependency = {
+      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, //
+      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,         //
+      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,          //
+      VK_ACCESS_SHADER_WRITE_BIT};
+  pass_spec.next_stage_dependency = {
+      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, //
+      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,         //
+      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,          //
+      VK_ACCESS_SHADER_WRITE_BIT};
+
+  screenspace_effects_pass =
+      RenderPass::create(color_attachments, depth_attachment, mat_spec,
+                         pass_spec, _device, _allocator);
+
+  screenspace_effects_pass.material.build(
+      _device, _descriptor_pool, screenspace_effects_pass.render_pass,
+      pass_spec.extent, _deallocation_queue);
+
+  _deallocation_queue.push([=] { screenspace_effects_pass.destroy(); });
   return true;
 }
 
@@ -692,19 +787,17 @@ bool Renderer::begin_command_buffer(VkCommandBuffer &command_buffer) {
   return true;
 }
 
-bool Renderer::begin_render_pass(VkRenderPass &render_pass,
-                                 VkFramebuffer &framebuffer,
-                                 VkCommandBuffer &command_buffer,
-                                 const VkExtent2D &extent,
-                                 float depth_clear_value,
-                                 float *color_clear_values,
-                                 int color_clear_values_count) {
+bool Renderer::begin_render_pass(
+    VkRenderPass &render_pass, VkFramebuffer &framebuffer,
+    VkCommandBuffer &command_buffer, const VkExtent2D &extent,
+    float depth_clear_value, float *color_clear_values,
+    int color_clear_values_count, float alpha_clear_value) {
   std::vector<VkClearValue> clear_values;
   if (color_clear_values_count >= 0) {
     for (int i = 0; i < color_clear_values_count; i++) {
       VkClearValue clear_value{};
       clear_value.color = {{color_clear_values[i], color_clear_values[i],
-                            color_clear_values[i], 1.0f}};
+                            color_clear_values[i], alpha_clear_value}};
       clear_values.push_back(clear_value);
     }
   }
@@ -858,7 +951,7 @@ void Renderer::transfer_texture_to_gpu(Texture::Ptr p_texture) {
   staging_buffer.destroy(); // We don't need the staging buffer anymore
 }
 
-bool Renderer::init_shadow_map() {
+bool Renderer::init_shadow_pass() {
   std::vector<AttachmentSpec> color_attachments;
 
   AttachmentSpec depth_attachment;
@@ -974,7 +1067,7 @@ bool Renderer::draw() {
 
   render_shadow_maps(_command_buffer);
   render_g_buffer(_command_buffer);
-
+  render_screenspace_effects(_command_buffer);
   render_composite(_command_buffer);
 
   submit_command_buffer(_command_buffer);
@@ -1039,7 +1132,7 @@ void Renderer::render_shadow_maps(VkCommandBuffer &command_buffer) {
   begin_render_pass(
       shadow_pass.render_pass, shadow_pass.framebuffer, _command_buffer,
       VkExtent2D{SHADOW_ATLAS_RESOLUTION, SHADOW_ATLAS_RESOLUTION}, 1.0f,
-      nullptr, 0);
+      nullptr, 0, 1.0f);
 
   shadow_pass.material.bind_descriptor_buffer(1, 0, _camera_buffer);
   shadow_pass.material.bind_descriptor_buffer(1, 1, _light_buffer);
@@ -1111,13 +1204,21 @@ void Renderer::render_shadow_maps(VkCommandBuffer &command_buffer) {
   }
 
   end_render_pass(_command_buffer);
+  change_image_layout(shadow_pass.depth_attachment.image_allocation.image,
+                      VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                      VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+                      VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                      VK_ACCESS_SHADER_READ_BIT,
+                      VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+                      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                      VK_IMAGE_ASPECT_DEPTH_BIT, _command_buffer);
 }
 
 void Renderer::render_g_buffer(VkCommandBuffer &command_buffer) {
   float clear_values[3] = {0.0f, 0.0f, 0.0f};
   begin_render_pass(deferred_pass.render_pass, deferred_pass.framebuffer,
                     command_buffer, deferred_pass.spec.extent, 1.0f,
-                    clear_values, 3);
+                    clear_values, 3, 0.0f);
 
   rend::ECS::EntityRegistry &registry = rend::ECS::get_entity_registry();
 
@@ -1161,6 +1262,7 @@ void Renderer::render_g_buffer(VkCommandBuffer &command_buffer) {
     Eigen::Matrix4f::Map(constants.model) = model;
     constants.texture_idx = texture_to_index[renderable.p_texture.get()] + 1;
     constants.light_index = 0;
+    constants.bitmask = renderable.reflective ? 1 : 0; // Reflectance bitmask
 
     vkCmdSetViewport(command_buffer, 0, 1, &viewport);
     vkCmdSetScissor(command_buffer, 0, 1, &scissor);
@@ -1170,10 +1272,7 @@ void Renderer::render_g_buffer(VkCommandBuffer &command_buffer) {
     vkCmdDraw(command_buffer, renderable.p_mesh->vertex_count(), 1, 0, 0);
   }
   end_render_pass(command_buffer);
-}
 
-void Renderer::render_composite(VkCommandBuffer &command_buffer) {
-  // Switch layouts before composite pass
   for (Attachment &attachment : deferred_pass.color_attachments) {
     change_image_layout(attachment.image_allocation.image,
                         VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -1193,20 +1292,68 @@ void Renderer::render_composite(VkCommandBuffer &command_buffer) {
                       VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
                       VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
                       VK_IMAGE_ASPECT_DEPTH_BIT, _command_buffer);
+}
 
-  change_image_layout(shadow_pass.depth_attachment.image_allocation.image,
-                      VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                      VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-                      VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                      VK_ACCESS_SHADER_READ_BIT,
-                      VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
-                      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                      VK_IMAGE_ASPECT_DEPTH_BIT, _command_buffer);
+void Renderer::render_screenspace_effects(VkCommandBuffer &command_buffer) {
+  float clear_values[2] = {0.0f, 0.0f};
+  begin_render_pass(screenspace_effects_pass.render_pass,
+                    screenspace_effects_pass.framebuffer, command_buffer,
+                    _window_dims, 1.0f, clear_values, 2, 0.0f);
 
+  screenspace_effects_pass.material.bind_descriptor_buffer(1, 0,
+                                                           _camera_buffer);
+
+  for (int i = 0; i < deferred_pass.color_attachments.size(); i++) {
+    Attachment &attachment = deferred_pass.color_attachments[i];
+    screenspace_effects_pass.material.ds_allocator.bind_image(
+        1, 3 + i, attachment.image_allocation,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, attachment.sampler);
+  }
+  screenspace_effects_pass.material.ds_allocator.bind_image(
+      1, 6, deferred_pass.depth_attachment.image_allocation,
+      VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+      deferred_pass.depth_attachment.sampler);
+
+  rend::ECS::EntityRegistry &registry = rend::ECS::get_entity_registry();
+
+  VkViewport viewport{0,
+                      0,
+                      static_cast<float>(_window_dims.width),
+                      static_cast<float>(_window_dims.height),
+                      0,
+                      1};
+  VkRect2D scissor{0, 0, _window_dims.width, _window_dims.height};
+  vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    screenspace_effects_pass.material.pipeline);
+  vkCmdBindDescriptorSets(
+      command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+      screenspace_effects_pass.material.pipeline_layout, 0,
+      screenspace_effects_pass.material.ds_allocator.descriptor_sets.size(),
+      screenspace_effects_pass.material.ds_allocator.descriptor_sets.data(), 0,
+      nullptr);
+
+  vkCmdSetViewport(_command_buffer, 0, 1, &viewport);
+  vkCmdSetScissor(_command_buffer, 0, 1, &scissor);
+  vkCmdDraw(command_buffer, 3, 1, 0, 0);
+
+  end_render_pass(_command_buffer);
+  for (int i = 0; i < screenspace_effects_pass.color_attachments.size(); i++) {
+    change_image_layout(
+        screenspace_effects_pass.color_attachments[i].image_allocation.image,
+        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_IMAGE_ASPECT_COLOR_BIT,
+        _command_buffer);
+  }
+}
+
+void Renderer::render_composite(VkCommandBuffer &command_buffer) {
   float clear_value = 0.0f;
   begin_render_pass(composite_pass.render_pass,
                     composite_pass.framebuffers[_swapchain_img_idx],
-                    command_buffer, _window_dims, 1.0f, &clear_value, 1);
+                    command_buffer, _window_dims, 1.0f, &clear_value, 1, 1.0f);
 
   composite_pass.material.bind_descriptor_buffer(1, 0, _camera_buffer);
   composite_pass.material.bind_descriptor_buffer(1, 1, _light_buffer);
@@ -1221,11 +1368,18 @@ void Renderer::render_composite(VkCommandBuffer &command_buffer) {
         1, 3 + i, attachment.image_allocation,
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, attachment.sampler);
   }
+
   composite_pass.material.ds_allocator.bind_image(
       1, 6, deferred_pass.depth_attachment.image_allocation,
       VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
       deferred_pass.depth_attachment.sampler);
 
+  for (int i = 0; i < screenspace_effects_pass.color_attachments.size(); i++) {
+    Attachment &attachment = screenspace_effects_pass.color_attachments[i];
+    composite_pass.material.ds_allocator.bind_image(
+        1, 7 + i, attachment.image_allocation,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, attachment.sampler);
+  }
   rend::ECS::EntityRegistry &registry = rend::ECS::get_entity_registry();
 
   VkViewport viewport{0,

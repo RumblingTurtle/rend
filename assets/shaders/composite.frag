@@ -24,11 +24,14 @@ layout(set = 1, binding = 3) uniform sampler2D world_normal;
 layout(set = 1, binding = 4) uniform sampler2D world_positions;
 layout(set = 1, binding = 5) uniform sampler2D albedo_texture;
 layout(set = 1, binding = 6) uniform sampler2D depth;
+layout(set = 1, binding = 7) uniform sampler2D occlusion;
+layout(set = 1, binding = 8) uniform sampler2D reflection;
 
 layout(push_constant) uniform PushConstants {
   mat4 model;
   int texture_index;
   int light_index;
+  int bitmask;
 }
 push_constants;
 
@@ -65,7 +68,8 @@ float shadow_test(int light_idx, vec4 frag_pos_world) {
 
 vec3 calculate_light_contrib(int light_idx, vec3 view_dir,
                              vec4 frag_normal_world, vec4 frag_pos_world) {
-  vec3 light_color = light_sources[light_idx].color.xyz;
+  float light_intensity = light_sources[light_idx].color.w;
+  vec3 light_color = light_sources[light_idx].color.xyz * light_intensity;
   float light_fov = light_sources[light_idx].position.w;
   vec3 light_dir = light_sources[light_idx].direction.xyz;
   mat4 light_view = light_sources[light_idx].view_matrix;
@@ -107,19 +111,19 @@ void main() {
   vec4 frag_normal_world = texture(world_normal, screen_uv);
   vec4 frag_pos_world = texture(world_positions, screen_uv);
   float frag_depth = texture(depth, screen_uv).r;
-
   vec4 frag_color = texture(albedo_texture, screen_uv);
 
-  vec3 out_color = vec3(0);
+  vec4 out_color = vec4(0);
   for (int i = 0; i < 64; i++) {
     if (light_sources[i].color.w < 0) {
       continue;
     }
-    out_color += calculate_light_contrib(i, view_dir, frag_normal_world,
-                                         frag_pos_world) *
-                 shadow_test(i, frag_pos_world);
+    out_color.xyz += calculate_light_contrib(i, view_dir, frag_normal_world,
+                                             frag_pos_world) *
+                     shadow_test(i, frag_pos_world);
   }
 
-  out_frag_color = vec4(out_color * frag_color.xyz, 1);
+  out_frag_color = vec4(
+      out_color.xyz * frag_color.xyz + texture(reflection, screen_uv).xyz, 1);
   gl_FragDepth = frag_depth;
 }

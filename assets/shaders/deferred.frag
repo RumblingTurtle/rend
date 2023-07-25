@@ -12,6 +12,7 @@ layout(push_constant) uniform PushConstants {
   mat4 model;
   int texture_index;
   int light_index;
+  int bitmask;
 }
 push_constants;
 
@@ -22,7 +23,7 @@ void main() {
     discard;
   }
 
-  frag_normal_world = vec4(vert_normal_world, 1.0);
+  frag_normal_world = vec4(vert_normal_world, push_constants.bitmask);
   frag_pos_world = vec4(vert_pos_world, 1.0);
   frag_albedo = texture(textures[push_constants.texture_index - 1], vert_uv);
 }

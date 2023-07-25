@@ -14,6 +14,7 @@ struct PushConstants {
   float model[16];
   int texture_idx;
   int light_index;
+  int bitmask;
 };
 
 struct CameraInfo {

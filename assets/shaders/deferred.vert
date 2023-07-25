@@ -19,6 +19,7 @@ layout(push_constant) uniform PushConstants {
   mat4 model;
   int texture_index;
   int light_index;
+  int bitmask;
 }
 push_constants;
 
