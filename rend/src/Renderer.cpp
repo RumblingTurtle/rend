@@ -1,13 +1,20 @@
 #include <rend/Rendering/Vulkan/Renderer.h>
 
 namespace rend {
+
+Renderer::Renderer() {
+  camera = std::make_unique<Camera>(
+      90.f, _window_dims.width / _window_dims.height, 0.1f, 200.0f);
+  lights.resize(MAX_LIGHTS);
+}
+
 void Renderer::cleanup() {
   if (!_initialized)
     return;
 
   // Wait for the command queue to complete if still running
   vkWaitForFences(_device, 1, &_command_complete_fence, VK_TRUE, 1000000000);
-  _deallocator.cleanup();
+  _deallocation_queue.cleanup();
 }
 
 bool Renderer::init() {
@@ -16,7 +23,7 @@ bool Renderer::init() {
                              _window_dims.height, SDL_WINDOW_VULKAN);
   // SDL_SetRelativeMouseMode(SDL_TRUE);
 
-  _deallocator.push([=]() { SDL_DestroyWindow(_window); });
+  _deallocation_queue.push([=]() { SDL_DestroyWindow(_window); });
 
   if (_window == nullptr) {
     std::cerr << "Failed to create _window: " << SDL_GetError() << std::endl;
@@ -74,7 +81,7 @@ bool Renderer::init_vulkan() {
   allocatorInfo.instance = _instance;
   vmaCreateAllocator(&allocatorInfo, &_allocator);
 
-  _deallocator.push([=]() {
+  _deallocation_queue.push([=]() {
     vmaDestroyAllocator(_allocator);
     vkDestroyDevice(_device, nullptr);
     vkDestroySurfaceKHR(_instance, _surface, nullptr);
@@ -92,7 +99,7 @@ bool Renderer::init_vulkan() {
       sizeof(LightSource) * MAX_LIGHTS, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
       VMA_MEMORY_USAGE_CPU_TO_GPU, _allocator);
 
-  _deallocator.push([&] {
+  _deallocation_queue.push([&] {
     _camera_buffer.destroy();
     _light_buffer.destroy();
   });
@@ -101,43 +108,11 @@ bool Renderer::init_vulkan() {
 }
 
 bool Renderer::init_materials() {
-  { // G-buffer
-    MaterialSpec mat_spec{};
-    mat_spec.color_attachment_count = 3;
-    mat_spec.vert_shader =
-        Path{ASSET_DIRECTORY} / "shaders/bin/deferred_vert.spv";
-    mat_spec.frag_shader =
-        Path{ASSET_DIRECTORY} / "shaders/bin/deferred_frag.spv";
-    mat_spec.bindings = {
-        {Binding{VK_SHADER_STAGE_FRAGMENT_BIT,              //
-                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, //
-                 0,                                         //
-                 MAX_TEXTURE_COUNT}},                       // Textures
-        {Binding{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, //
-                 VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,                         //
-                 sizeof(CameraInfo),                                        //
-                 1},
-         Binding{VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, //
-                 VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,                         //
-                 sizeof(LightSource),                                       //
-                 MAX_LIGHTS},                  // Camera info (view, projection)
-         Binding{VK_SHADER_STAGE_FRAGMENT_BIT, //
-                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, //
-                 0,                                         //
-                 1}}};                                      // Shadow map
-
-    mat_spec.input_attributes = {VK_FORMAT_R32G32B32_SFLOAT, // Position
-                                 VK_FORMAT_R32G32B32_SFLOAT, // Normal
-                                 VK_FORMAT_R32G32_SFLOAT};   // UV
-
-    g_buffer.material = Material{mat_spec};
-
-    g_buffer.material.build(_device, _descriptor_pool, g_buffer.render_pass,
-                            _window_dims, _deallocator);
-  }
-
   { // Composite pass
     MaterialSpec mat_spec{};
+    mat_spec.depth_test_enabled = true;
+    mat_spec.blend_test_enabled = false;
+
     mat_spec.color_attachment_count = 1;
     mat_spec.vert_shader =
         Path{ASSET_DIRECTORY} / "shaders/bin/composite_vert.spv";
@@ -178,13 +153,16 @@ bool Renderer::init_materials() {
                  1}}};                                                      //
 
     mat_spec.input_attributes = {};
-    composite_pass_material = Material{mat_spec}; // Color
-    composite_pass_material.build(_device, _descriptor_pool, _render_pass,
-                                  _window_dims, _deallocator);
+    composite_pass.material = Material{mat_spec}; // Color
+    composite_pass.material.build(_device, _descriptor_pool,
+                                  composite_pass.render_pass, _window_dims,
+                                  _deallocation_queue);
   }
 
   { // Debug
     MaterialSpec mat_spec{};
+    mat_spec.depth_test_enabled = true;
+    mat_spec.blend_test_enabled = false;
     mat_spec.color_attachment_count = 1;
     mat_spec.vert_shader = Path{ASSET_DIRECTORY} / "shaders/bin/debug_vert.spv";
     mat_spec.frag_shader = Path{ASSET_DIRECTORY} / "shaders/bin/debug_frag.spv";
@@ -195,33 +173,12 @@ bool Renderer::init_materials() {
     mat_spec.input_attributes =
         std::vector<VkFormat>{VK_FORMAT_R32G32B32_SFLOAT,  // Position
                               VK_FORMAT_R32G32B32_SFLOAT}; // Color
-    debug_material = Material{mat_spec};                   // Color
-    debug_material.build(_device, _descriptor_pool, _render_pass, _window_dims,
-                         _deallocator);
+    composite_pass.debug_material = Material{mat_spec};
+    composite_pass.debug_material.build(_device, _descriptor_pool,
+                                        composite_pass.render_pass,
+                                        _window_dims, _deallocation_queue);
   }
 
-  { // Shadow pass
-    MaterialSpec mat_spec{};
-    mat_spec.color_attachment_count = 1;
-    mat_spec.vert_shader =
-        Path{ASSET_DIRECTORY} / "shaders/bin/shadow_map_vert.spv",
-    mat_spec.frag_shader =
-        Path{ASSET_DIRECTORY} / "shaders/bin/shadow_map_frag.spv",
-    mat_spec.bindings = DEFAULT_BINDINGS;
-    mat_spec.input_attributes =
-        std::vector<VkFormat>{VK_FORMAT_R32G32B32_SFLOAT}; // Color
-
-    // Have to set custom stride
-    // in order to be able to use the same input buffer
-    mat_spec.vertex_stride = FORMAT_SIZES[VK_FORMAT_R32G32B32_SFLOAT] +
-                             FORMAT_SIZES[VK_FORMAT_R32G32B32_SFLOAT] +
-                             FORMAT_SIZES[VK_FORMAT_R32G32_SFLOAT];
-
-    shadow_material = Material{mat_spec};
-    shadow_material.build(
-        _device, _descriptor_pool, _shadow_pass.render_pass,
-        VkExtent2D{SHADOW_MAP_RESOLUTION, SHADOW_MAP_RESOLUTION}, _deallocator);
-  }
   return true;
 }
 
@@ -235,33 +192,33 @@ bool Renderer::init_swapchain() {
           .value();
 
   _swapchain = vkb_swapchain.swapchain;
-  _swapchain_images = vkb_swapchain.get_images().value();
-  _swapchain_image_views = vkb_swapchain.get_image_views().value();
-  _swapchain_image_format = vkb_swapchain.image_format;
+  composite_pass.images = vkb_swapchain.get_images().value();
+  composite_pass.image_views = vkb_swapchain.get_image_views().value();
+  composite_pass.color_format = vkb_swapchain.image_format;
 
-  _deallocator.push(
+  _deallocation_queue.push(
       [=] { vkDestroySwapchainKHR(_device, _swapchain, nullptr); });
   return true;
 }
 
 bool Renderer::init_z_buffer() {
   VkImageCreateInfo image_info = vk_struct_init::get_image_create_info(
-      VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+      composite_pass.depth_format, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
       VkExtent3D{_window_dims.width, _window_dims.height, 1}, VK_IMAGE_TYPE_2D);
 
   VkImageViewCreateInfo image_view_info =
       vk_struct_init::get_image_view_create_info(
-          nullptr, VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT,
+          nullptr, composite_pass.depth_format, VK_IMAGE_ASPECT_DEPTH_BIT,
           VK_IMAGE_VIEW_TYPE_2D); // Image arg will be substituted from
                                   // image_infos image field
 
   VmaAllocationCreateInfo alloc_info = vk_struct_init::get_allocation_info(
       VMA_MEMORY_USAGE_GPU_ONLY, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-  _depth_image = ImageAllocation::create(image_info, image_view_info,
-                                         alloc_info, _device, _allocator);
+  composite_pass.depth_buffer = ImageAllocation::create(
+      image_info, image_view_info, alloc_info, _device, _allocator);
 
-  _deallocator.push([=] { _depth_image.destroy(); });
+  _deallocation_queue.push([=] { composite_pass.depth_buffer.destroy(); });
   return true;
 }
 
@@ -270,179 +227,113 @@ bool Renderer::init_cmd_buffer() {
       vk_struct_init::get_command_pool_create_info(
           _queue_family, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
 
-  VK_CHECK(vkCreateCommandPool(_device, &cmd_pool_info, nullptr, &_cmd_pool),
-           "Failed to create command pool");
+  VK_CHECK(
+      vkCreateCommandPool(_device, &cmd_pool_info, nullptr, &_command_pool),
+      "Failed to create command pool");
   VK_CHECK(vkCreateCommandPool(_device, &cmd_pool_info, nullptr,
                                &_submit_buffer.pool),
            "Failed to create command pool");
 
   VkCommandBufferAllocateInfo cmd_buffer_info =
       vk_struct_init::get_command_buffer_allocate_info(
-          _cmd_pool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1);
+          _command_pool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1);
 
   VK_CHECK(
       vkAllocateCommandBuffers(_device, &cmd_buffer_info, &_command_buffer),
       "Failed to allocate command buffer");
 
-  _deallocator.push([=] {
+  _deallocation_queue.push([=] {
     vkDestroyCommandPool(_device, _submit_buffer.pool, nullptr);
-    vkDestroyCommandPool(_device, _cmd_pool, nullptr);
+    vkDestroyCommandPool(_device, _command_pool, nullptr);
   });
 
   return true;
 }
 
 bool Renderer::init_deferred_pass() {
-  VkSamplerCreateInfo sampler_info = vk_struct_init::get_sampler_create_info(
-      VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
-  VK_CHECK(vkCreateSampler(_device, &sampler_info, nullptr, &g_buffer.sampler),
-           "Failed to create sampler");
+  AttachmentSpec color_attachment;
+  color_attachment.active = true;
+  color_attachment.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+  color_attachment.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  color_attachment.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+  color_attachment.extent = _window_dims;
+  color_attachment.filter_mode = VK_FILTER_LINEAR;
+  color_attachment.address_mode = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+  color_attachment.usage =
+      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 
-  _deallocator.push(
-      [&] { vkDestroySampler(_device, g_buffer.sampler, nullptr); });
+  std::vector<AttachmentSpec> color_attachments = {
+      color_attachment, color_attachment, color_attachment};
 
-  // G buffer
-  VkImageCreateInfo image_info = vk_struct_init::get_image_create_info(
-      g_buffer.buffer_format,
-      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-      VkExtent3D{_window_dims.width, _window_dims.height, 1}, VK_IMAGE_TYPE_2D);
+  AttachmentSpec depth_attachment;
+  depth_attachment.active = true;
+  depth_attachment.format = VK_FORMAT_D32_SFLOAT;
+  depth_attachment.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+  depth_attachment.aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+  depth_attachment.extent = _window_dims;
+  depth_attachment.filter_mode = VK_FILTER_LINEAR;
+  depth_attachment.address_mode = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+  depth_attachment.usage =
+      VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 
-  VkImageViewCreateInfo image_view_info =
-      vk_struct_init::get_image_view_create_info(
-          nullptr, g_buffer.buffer_format, VK_IMAGE_ASPECT_COLOR_BIT,
-          VK_IMAGE_VIEW_TYPE_2D);
+  MaterialSpec mat_spec{};
+  mat_spec.depth_test_enabled = true;
+  mat_spec.blend_test_enabled = false;
+  mat_spec.color_attachment_count = 3;
+  mat_spec.vert_shader =
+      Path{ASSET_DIRECTORY} / "shaders/bin/deferred_vert.spv";
+  mat_spec.frag_shader =
+      Path{ASSET_DIRECTORY} / "shaders/bin/deferred_frag.spv";
+  mat_spec.bindings = {
+      {Binding{VK_SHADER_STAGE_FRAGMENT_BIT,              //
+               VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, //
+               0,                                         //
+               MAX_TEXTURE_COUNT}},                       // Textures
+      {Binding{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, //
+               VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,                         //
+               sizeof(CameraInfo),                                        //
+               1},
+       Binding{VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, //
+               VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,                         //
+               sizeof(LightSource),                                       //
+               MAX_LIGHTS},                  // Camera info (view, projection)
+       Binding{VK_SHADER_STAGE_FRAGMENT_BIT, //
+               VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, //
+               0,                                         //
+               1}}};                                      // Shadow map
 
-  VmaAllocationCreateInfo alloc_info = vk_struct_init::get_allocation_info(
-      VMA_MEMORY_USAGE_GPU_ONLY, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+  mat_spec.input_attributes = {VK_FORMAT_R32G32B32_SFLOAT, // Position
+                               VK_FORMAT_R32G32B32_SFLOAT, // Normal
+                               VK_FORMAT_R32G32_SFLOAT};   // UV
 
-  g_buffer.normal_buffer = ImageAllocation::create(
-      image_info, image_view_info, alloc_info, _device, _allocator);
-  g_buffer.position_buffer = ImageAllocation::create(
-      image_info, image_view_info, alloc_info, _device, _allocator);
-  g_buffer.albedo_buffer = ImageAllocation::create(
-      image_info, image_view_info, alloc_info, _device, _allocator);
+  RenderPassSpec pass_spec;
+  pass_spec.extent = _window_dims;
+  pass_spec.prev_stage_dependency = {
+      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, //
+      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,         //
+      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,          //
+      VK_ACCESS_SHADER_WRITE_BIT};
+  pass_spec.next_stage_dependency = {
+      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, //
+      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,         //
+      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,          //
+      VK_ACCESS_SHADER_WRITE_BIT};
 
-  g_buffer.depth_buffer = ImageAllocation::create(
-      g_buffer.depth_format,
-      VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-      VkExtent3D{_window_dims.width, _window_dims.height, 1}, VK_IMAGE_TYPE_2D,
-      VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_VIEW_TYPE_2D,
-      VMA_MEMORY_USAGE_GPU_ONLY, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, _device,
-      _allocator);
+  deferred_pass = RenderPass::create(color_attachments, depth_attachment,
+                                     mat_spec, pass_spec, _device, _allocator);
 
-  _deallocator.push([=] {
-    g_buffer.normal_buffer.destroy();
-    g_buffer.position_buffer.destroy();
-    g_buffer.albedo_buffer.destroy();
-    g_buffer.depth_buffer.destroy();
-  });
+  deferred_pass.material.build(_device, _descriptor_pool,
+                               deferred_pass.render_pass, pass_spec.extent,
+                               _deallocation_queue);
 
-  std::vector<VkAttachmentReference> attachment_references = {
-      {0, g_buffer.buffer_layout},
-      {1, g_buffer.buffer_layout},
-      {2, g_buffer.buffer_layout},
-  };
-
-  VkAttachmentReference depth_attachment_reference = {3, g_buffer.depth_layout};
-
-  std::vector<VkAttachmentDescription> attachment_descriptions(4);
-  for (int i = 0; i < 3; i++) {
-    attachment_descriptions[i] = vk_struct_init::get_attachment_description(
-        g_buffer.buffer_format,           //
-        VK_SAMPLE_COUNT_1_BIT,            //
-        VK_ATTACHMENT_LOAD_OP_CLEAR,      //
-        VK_ATTACHMENT_STORE_OP_STORE,     //
-        VK_ATTACHMENT_LOAD_OP_DONT_CARE,  //
-        VK_ATTACHMENT_STORE_OP_DONT_CARE, //
-        VK_IMAGE_LAYOUT_UNDEFINED,        //
-        g_buffer.buffer_layout            //
-    );
-  }
-
-  attachment_descriptions[3] = vk_struct_init::get_attachment_description(
-      g_buffer.depth_format,            //
-      VK_SAMPLE_COUNT_1_BIT,            //
-      VK_ATTACHMENT_LOAD_OP_CLEAR,      //
-      VK_ATTACHMENT_STORE_OP_STORE,     //
-      VK_ATTACHMENT_LOAD_OP_LOAD,       //
-      VK_ATTACHMENT_STORE_OP_DONT_CARE, //
-      VK_IMAGE_LAYOUT_UNDEFINED,        //
-      g_buffer.depth_layout             //
-  );
-
-  VkSubpassDependency prev_subpass_dep = vk_struct_init::get_subpass_dependency(
-      VK_SUBPASS_EXTERNAL, //
-      0,                   //
-      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, //
-      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-      VK_ACCESS_SHADER_WRITE_BIT, //
-      VK_DEPENDENCY_BY_REGION_BIT);
-
-  VkSubpassDependency next_subpass_dep = vk_struct_init::get_subpass_dependency(
-      0,
-      VK_SUBPASS_EXTERNAL, //
-      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-      VK_ACCESS_SHADER_WRITE_BIT, //
-      VK_DEPENDENCY_BY_REGION_BIT);
-
-  VkSubpassDependency subpass_dependencies[2] = {prev_subpass_dep,
-                                                 next_subpass_dep};
-
-  VkSubpassDescription subpass_description =
-      vk_struct_init::get_subpass_description(
-          0,                                                          //
-          VK_PIPELINE_BIND_POINT_GRAPHICS,                            //
-          0, nullptr,                                                 //
-          attachment_references.size(), attachment_references.data(), //
-          nullptr,
-          &depth_attachment_reference, //
-          0, nullptr);
-
-  VkRenderPassCreateInfo render_pass_info =
-      vk_struct_init::get_create_render_pass_info(
-          0,                              //
-          attachment_descriptions.size(), //
-          attachment_descriptions.data(), //
-          1, &subpass_description,        //
-          2, subpass_dependencies);
-
-  VK_CHECK(vkCreateRenderPass(_device, &render_pass_info, nullptr,
-                              &g_buffer.render_pass),
-           "Failed to create renderpass");
-
-  _deallocator.push(
-      [=]() { vkDestroyRenderPass(_device, g_buffer.render_pass, nullptr); });
-
-  std::vector<VkImageView> attachments = {
-      g_buffer.normal_buffer.view, g_buffer.position_buffer.view,
-      g_buffer.albedo_buffer.view, g_buffer.depth_buffer.view};
-
-  VkFramebufferCreateInfo fb_info = {};
-  fb_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-  fb_info.pNext = nullptr;
-  fb_info.renderPass = g_buffer.render_pass;
-  fb_info.width = _window_dims.width;
-  fb_info.height = _window_dims.height;
-  fb_info.layers = 1;
-  fb_info.attachmentCount = attachments.size();
-  fb_info.pAttachments = attachments.data();
-
-  VK_CHECK(
-      vkCreateFramebuffer(_device, &fb_info, nullptr, &g_buffer.framebuffer),
-      "Failed to create G-buffer framebuffer");
-  _deallocator.push(
-      [=]() { vkDestroyFramebuffer(_device, g_buffer.framebuffer, nullptr); });
-
+  _deallocation_queue.push([=] { deferred_pass.destroy(); });
   return true;
 }
 
 bool Renderer::init_renderpass() {
   VkAttachmentDescription color_attachment =
       vk_struct_init::get_attachment_description(
-          _swapchain_image_format,          //
+          composite_pass.color_format,      //
           VK_SAMPLE_COUNT_1_BIT,            //
           VK_ATTACHMENT_LOAD_OP_CLEAR,      //
           VK_ATTACHMENT_STORE_OP_STORE,     //
@@ -454,7 +345,7 @@ bool Renderer::init_renderpass() {
 
   VkAttachmentDescription depth_attachment =
       vk_struct_init::get_attachment_description(
-          _depth_image.format,                             //
+          composite_pass.depth_buffer.format,              //
           VK_SAMPLE_COUNT_1_BIT,                           //
           VK_ATTACHMENT_LOAD_OP_CLEAR,                     //
           VK_ATTACHMENT_STORE_OP_STORE,                    //
@@ -526,11 +417,12 @@ bool Renderer::init_renderpass() {
                                                   1, &subpass,    //
                                                   2, subpass_dependencies);
 
-  VK_CHECK(
-      vkCreateRenderPass(_device, &render_pass_info, nullptr, &_render_pass),
-      "Failed to create renderpass");
-  _deallocator.push(
-      [=]() { vkDestroyRenderPass(_device, _render_pass, nullptr); });
+  VK_CHECK(vkCreateRenderPass(_device, &render_pass_info, nullptr,
+                              &composite_pass.render_pass),
+           "Failed to create renderpass");
+  _deallocation_queue.push([=]() {
+    vkDestroyRenderPass(_device, composite_pass.render_pass, nullptr);
+  });
   return true;
 }
 
@@ -540,24 +432,26 @@ bool Renderer::init_framebuffers() {
   fb_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
   fb_info.pNext = nullptr;
   fb_info.attachmentCount = 2;
-  fb_info.renderPass = _render_pass;
+  fb_info.renderPass = composite_pass.render_pass;
   fb_info.width = _window_dims.width;
   fb_info.height = _window_dims.height;
   fb_info.layers = 1;
 
   // grab how many images we have in the swapchain
-  const uint32_t swapchain_imagecount = _swapchain_images.size();
-  _framebuffers.resize(swapchain_imagecount);
+  const uint32_t swapchain_imagecount = composite_pass.images.size();
+  composite_pass.framebuffers.resize(swapchain_imagecount);
 
   // create framebuffers for each of the swapchain image views
   for (int i = 0; i < swapchain_imagecount; i++) {
-    VkImageView attachments[2] = {_swapchain_image_views[i], _depth_image.view};
+    VkImageView attachments[2] = {composite_pass.image_views[i],
+                                  composite_pass.depth_buffer.view};
     fb_info.pAttachments = attachments;
-    VK_CHECK(vkCreateFramebuffer(_device, &fb_info, nullptr, &_framebuffers[i]),
+    VK_CHECK(vkCreateFramebuffer(_device, &fb_info, nullptr,
+                                 &composite_pass.framebuffers[i]),
              "Failed to create framebuffer");
-    _deallocator.push([=] {
-      vkDestroyFramebuffer(_device, _framebuffers[i], nullptr);
-      vkDestroyImageView(_device, _swapchain_image_views[i], nullptr);
+    _deallocation_queue.push([=] {
+      vkDestroyFramebuffer(_device, composite_pass.framebuffers[i], nullptr);
+      vkDestroyImageView(_device, composite_pass.image_views[i], nullptr);
     });
   }
 
@@ -589,7 +483,7 @@ bool Renderer::init_sync_primitives() {
   VK_CHECK(vkCreateFence(_device, &fence_info, nullptr, &_submit_buffer.fence),
            "Failed to create submit fence");
 
-  _deallocator.push([=] {
+  _deallocation_queue.push([=] {
     vkDestroySemaphore(_device, _swapchain_semaphore, nullptr);
     vkDestroySemaphore(_device, _render_complete_semaphore, nullptr);
     vkDestroyFence(_device, _command_complete_fence, nullptr);
@@ -619,17 +513,17 @@ bool Renderer::init_descriptor_pool() {
     return false;
   }
 
-  _deallocator.push(
+  _deallocation_queue.push(
       [=] { vkDestroyDescriptorPool(_device, _descriptor_pool, nullptr); });
   return true;
 }
 
 bool Renderer::init_debug_renderable() {
-  debug_renderable.buffer = BufferAllocation::create(
+  composite_pass.buffer_allocation = BufferAllocation::create(
       3 * sizeof(float) * MAX_DEBUG_VERTICES, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
       VMA_MEMORY_USAGE_CPU_TO_GPU, _allocator);
 
-  _deallocator.push([&] { debug_renderable.buffer.destroy(); });
+  _deallocation_queue.push([&] { composite_pass.buffer_allocation.destroy(); });
 
   return true;
 }
@@ -640,20 +534,20 @@ void Renderer::draw_debug_line(const Eigen::Vector3f &start,
   if (!debug_mode) {
     return;
   }
-  if (MAX_DEBUG_VERTICES <= debug_renderable.debug_verts_to_draw * 2) {
+  if (MAX_DEBUG_VERTICES <= composite_pass.debug_verts_to_draw * 2) {
     throw std::runtime_error("Debug buffer overflow");
   }
   // TODO: Replace with vert incices
-  int start_offset = debug_renderable.debug_verts_to_draw * 6;
-  memcpy(debug_renderable.debug_buffer + start_offset, start.data(),
+  int start_offset = composite_pass.debug_verts_to_draw * 6;
+  memcpy(composite_pass.debug_buffer + start_offset, start.data(),
          sizeof(float) * 3);
-  memcpy(debug_renderable.debug_buffer + start_offset + 3, color.data(),
+  memcpy(composite_pass.debug_buffer + start_offset + 3, color.data(),
          sizeof(float) * 3);
-  memcpy(debug_renderable.debug_buffer + start_offset + 6, end.data(),
+  memcpy(composite_pass.debug_buffer + start_offset + 6, end.data(),
          sizeof(float) * 3);
-  memcpy(debug_renderable.debug_buffer + start_offset + 9, color.data(),
+  memcpy(composite_pass.debug_buffer + start_offset + 9, color.data(),
          sizeof(float) * 3);
-  debug_renderable.debug_verts_to_draw += 2;
+  composite_pass.debug_verts_to_draw += 2;
 }
 
 void Renderer::draw_debug_quad(const Eigen::Matrix<float, 4, 3> &quad_verts,
@@ -965,112 +859,59 @@ void Renderer::transfer_texture_to_gpu(Texture::Ptr p_texture) {
 }
 
 bool Renderer::init_shadow_map() {
-  VkSamplerCreateInfo sampler_info = vk_struct_init::get_sampler_create_info(
-      VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
-  VK_CHECK(
-      vkCreateSampler(_device, &sampler_info, nullptr, &_shadow_pass.sampler),
-      "Failed to create sampler");
+  std::vector<AttachmentSpec> color_attachments;
 
-  _deallocator.push(
-      [&] { vkDestroySampler(_device, _shadow_pass.sampler, nullptr); });
+  AttachmentSpec depth_attachment;
+  depth_attachment.active = true;
+  depth_attachment.format = VK_FORMAT_D32_SFLOAT;
+  depth_attachment.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+  depth_attachment.aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+  depth_attachment.extent =
+      VkExtent2D{SHADOW_ATLAS_RESOLUTION, SHADOW_ATLAS_RESOLUTION};
+  depth_attachment.filter_mode = VK_FILTER_LINEAR;
+  depth_attachment.address_mode = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+  depth_attachment.usage =
+      VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 
-  // Allocate shadow mapping images
-  VkImageCreateInfo image_info = vk_struct_init::get_image_create_info(
-      VK_FORMAT_D32_SFLOAT,
-      VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-      VkExtent3D{SHADOW_ATLAS_RESOLUTION, SHADOW_ATLAS_RESOLUTION, 1},
-      VK_IMAGE_TYPE_2D);
+  MaterialSpec mat_spec{};
+  mat_spec.depth_test_enabled = true;
+  mat_spec.blend_test_enabled = false;
+  mat_spec.color_attachment_count = 1;
+  mat_spec.vert_shader =
+      Path{ASSET_DIRECTORY} / "shaders/bin/shadow_map_vert.spv",
+  mat_spec.frag_shader =
+      Path{ASSET_DIRECTORY} / "shaders/bin/shadow_map_frag.spv",
+  mat_spec.bindings = DEFAULT_BINDINGS;
+  mat_spec.input_attributes =
+      std::vector<VkFormat>{VK_FORMAT_R32G32B32_SFLOAT}; // Color
 
-  VkImageViewCreateInfo image_view_info =
-      vk_struct_init::get_image_view_create_info(nullptr, VK_FORMAT_D32_SFLOAT,
-                                                 VK_IMAGE_ASPECT_DEPTH_BIT,
-                                                 VK_IMAGE_VIEW_TYPE_2D);
+  // Have to set custom stride
+  // in order to be able to use the same input buffer
+  mat_spec.vertex_stride = FORMAT_SIZES[VK_FORMAT_R32G32B32_SFLOAT] +
+                           FORMAT_SIZES[VK_FORMAT_R32G32B32_SFLOAT] +
+                           FORMAT_SIZES[VK_FORMAT_R32G32_SFLOAT];
 
-  VmaAllocationCreateInfo alloc_info = vk_struct_init::get_allocation_info(
-      VMA_MEMORY_USAGE_GPU_ONLY, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-  _shadow_pass.image_allocation = ImageAllocation::create(
-      image_info, image_view_info, alloc_info, _device, _allocator);
-  _deallocator.push([=] { _shadow_pass.image_allocation.destroy(); });
-
-  // Create renderpass
-  VkAttachmentDescription depth_attachment =
-      vk_struct_init::get_attachment_description(
-          _shadow_pass.image_allocation.format, //
-          VK_SAMPLE_COUNT_1_BIT,                //
-          VK_ATTACHMENT_LOAD_OP_CLEAR,          //
-          VK_ATTACHMENT_STORE_OP_STORE,         //
-          VK_ATTACHMENT_LOAD_OP_DONT_CARE,      //
-          VK_ATTACHMENT_STORE_OP_DONT_CARE,     //
-          VK_IMAGE_LAYOUT_UNDEFINED,            //
-          _shadow_pass.layout                   //
-      );
-
-  VkAttachmentReference depth_attachment_ref = {
-      0, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
-
-  // This render pass depth tests depend on prev renderpass fragment shader
-  VkSubpassDependency subpass_dep1 = vk_struct_init::get_subpass_dependency(
-      VK_SUBPASS_EXTERNAL, //
-      0,                   //
+  RenderPassSpec pass_spec;
+  pass_spec.extent =
+      VkExtent2D{SHADOW_ATLAS_RESOLUTION, SHADOW_ATLAS_RESOLUTION};
+  pass_spec.prev_stage_dependency = {
       VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
       VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, //
-      VK_ACCESS_SHADER_READ_BIT,
+      VK_ACCESS_SHADER_READ_BIT,                  //
+      VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT};
+  pass_spec.next_stage_dependency = {
+      VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,    //
+      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,        //
       VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, //
-      VK_DEPENDENCY_BY_REGION_BIT);
+      VK_ACCESS_SHADER_READ_BIT};
 
-  // Next renderpass fragment shades depends on this renderpass write to depth
-  // attachment
-  VkSubpassDependency subpass_dep2 = vk_struct_init::get_subpass_dependency(
-      0,
-      VK_SUBPASS_EXTERNAL, //
-      VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
-      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, //
-      VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-      VK_ACCESS_SHADER_READ_BIT, //
-      VK_DEPENDENCY_BY_REGION_BIT);
+  shadow_pass = RenderPass::create(color_attachments, depth_attachment,
+                                   mat_spec, pass_spec, _device, _allocator);
 
-  VkSubpassDependency subpass_dependencies[2] = {subpass_dep1, subpass_dep2};
+  shadow_pass.material.build(_device, _descriptor_pool, shadow_pass.render_pass,
+                             pass_spec.extent, _deallocation_queue);
 
-  VkSubpassDescription subpass = vk_struct_init::get_subpass_description(
-      0,                               //
-      VK_PIPELINE_BIND_POINT_GRAPHICS, //
-      0, nullptr,                      //
-      0, nullptr,                      //
-      nullptr,
-      &depth_attachment_ref, //
-      0, nullptr);
-
-  // Define a renderpass
-  VkRenderPassCreateInfo render_pass_info =
-      vk_struct_init::get_create_render_pass_info(0,                    //
-                                                  1, &depth_attachment, //
-                                                  1, &subpass,          //
-                                                  2, subpass_dependencies);
-  VK_CHECK(vkCreateRenderPass(_device, &render_pass_info, nullptr,
-                              &_shadow_pass.render_pass),
-           "Failed to create renderpass");
-
-  _deallocator.push([=]() {
-    vkDestroyRenderPass(_device, _shadow_pass.render_pass, nullptr);
-  });
-
-  VkFramebufferCreateInfo fb_info = {};
-  fb_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-  fb_info.pNext = nullptr;
-  fb_info.attachmentCount = 1;
-  fb_info.renderPass = _shadow_pass.render_pass;
-  fb_info.width = SHADOW_ATLAS_RESOLUTION;
-  fb_info.height = SHADOW_ATLAS_RESOLUTION;
-  fb_info.layers = 1;
-
-  fb_info.pAttachments = &(_shadow_pass.image_allocation.view);
-  VK_CHECK(vkCreateFramebuffer(_device, &fb_info, nullptr,
-                               &_shadow_pass.framebuffer),
-           "Failed to create shadow map framebuffer");
-  _deallocator.push([=]() {
-    vkDestroyFramebuffer(_device, _shadow_pass.framebuffer, nullptr);
-  });
+  _deallocation_queue.push([=]() { shadow_pass.destroy(); });
 
   return true;
 }
@@ -1087,7 +928,8 @@ void Renderer::check_renderables() {
 
     if (renderable.p_mesh != nullptr &&
         !renderable.p_mesh->buffer_allocation.buffer_allocated) {
-      renderable.p_mesh->generate_allocation_buffer(_allocator, _deallocator);
+      renderable.p_mesh->generate_allocation_buffer(_allocator,
+                                                    _deallocation_queue);
     }
 
     if (renderable.p_texture == nullptr) {
@@ -1095,7 +937,8 @@ void Renderer::check_renderables() {
     }
 
     if (!renderable.p_texture->image_allocated()) {
-      renderable.p_texture->allocate_image(_device, _allocator, _deallocator);
+      renderable.p_texture->allocate_image(_device, _allocator,
+                                           _deallocation_queue);
       transfer_texture_to_gpu(renderable.p_texture);
       if (texture_to_index.find(renderable.p_texture.get()) ==
           texture_to_index.end()) {
@@ -1188,18 +1031,18 @@ void Renderer::bind_textures() {
     image_infos[valid_texture_count + i].sampler = dummy_texture->sampler;
   }
 
-  composite_pass_material.ds_allocator.bind_image_infos(0, 0, image_infos);
-  g_buffer.material.ds_allocator.bind_image_infos(0, 0, image_infos);
+  composite_pass.material.ds_allocator.bind_image_infos(0, 0, image_infos);
+  deferred_pass.material.ds_allocator.bind_image_infos(0, 0, image_infos);
 }
 
 void Renderer::render_shadow_maps(VkCommandBuffer &command_buffer) {
   begin_render_pass(
-      _shadow_pass.render_pass, _shadow_pass.framebuffer, _command_buffer,
+      shadow_pass.render_pass, shadow_pass.framebuffer, _command_buffer,
       VkExtent2D{SHADOW_ATLAS_RESOLUTION, SHADOW_ATLAS_RESOLUTION}, 1.0f,
       nullptr, 0);
 
-  shadow_material.bind_descriptor_buffer(1, 0, _camera_buffer);
-  shadow_material.bind_descriptor_buffer(1, 1, _light_buffer);
+  shadow_pass.material.bind_descriptor_buffer(1, 0, _camera_buffer);
+  shadow_pass.material.bind_descriptor_buffer(1, 1, _light_buffer);
 
   rend::ECS::EntityRegistry &registry = rend::ECS::get_entity_registry();
 
@@ -1215,7 +1058,7 @@ void Renderer::render_shadow_maps(VkCommandBuffer &command_buffer) {
     rend::ECS::EID eid = *rb_iterator;
 
     Renderable &renderable = registry.get_component<Renderable>(eid);
-    Material &material = shadow_material;
+    Material &material = shadow_pass.material;
     Mesh::Ptr mesh = renderable.p_mesh;
 
     Transform &transform = registry.get_component<Transform>(eid);
@@ -1272,8 +1115,9 @@ void Renderer::render_shadow_maps(VkCommandBuffer &command_buffer) {
 
 void Renderer::render_g_buffer(VkCommandBuffer &command_buffer) {
   float clear_values[3] = {0.0f, 0.0f, 0.0f};
-  begin_render_pass(g_buffer.render_pass, g_buffer.framebuffer, command_buffer,
-                    _window_dims, 1.0f, clear_values, 3);
+  begin_render_pass(deferred_pass.render_pass, deferred_pass.framebuffer,
+                    command_buffer, deferred_pass.spec.extent, 1.0f,
+                    clear_values, 3);
 
   rend::ECS::EntityRegistry &registry = rend::ECS::get_entity_registry();
 
@@ -1285,7 +1129,7 @@ void Renderer::render_g_buffer(VkCommandBuffer &command_buffer) {
                       1};
   VkRect2D scissor{0, 0, _window_dims.width, _window_dims.height};
 
-  g_buffer.material.bind_descriptor_buffer(1, 0, _camera_buffer);
+  deferred_pass.material.bind_descriptor_buffer(1, 0, _camera_buffer);
 
   for (rend::ECS::EntityRegistry::ArchetypeIterator rb_iterator =
            registry.archetype_iterator<Renderable, Transform>();
@@ -1294,7 +1138,7 @@ void Renderer::render_g_buffer(VkCommandBuffer &command_buffer) {
 
     Renderable &renderable = registry.get_component<Renderable>(eid);
 
-    Material &material = g_buffer.material;
+    Material &material = deferred_pass.material;
     Mesh::Ptr mesh = renderable.p_mesh;
 
     Transform &transform = registry.get_component<Transform>(eid);
@@ -1330,31 +1174,27 @@ void Renderer::render_g_buffer(VkCommandBuffer &command_buffer) {
 
 void Renderer::render_composite(VkCommandBuffer &command_buffer) {
   // Switch layouts before composite pass
-  change_image_layout(
-      g_buffer.normal_buffer.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_IMAGE_ASPECT_COLOR_BIT,
-      _command_buffer);
+  for (Attachment &attachment : deferred_pass.color_attachments) {
+    change_image_layout(attachment.image_allocation.image,
+                        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                        VK_ACCESS_SHADER_READ_BIT,
+                        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                        VK_IMAGE_ASPECT_COLOR_BIT, _command_buffer);
+  }
 
-  change_image_layout(
-      g_buffer.position_buffer.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_IMAGE_ASPECT_COLOR_BIT,
-      _command_buffer);
+  change_image_layout(deferred_pass.depth_attachment.image_allocation.image,
+                      VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                      VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+                      VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                      VK_ACCESS_SHADER_READ_BIT,
+                      VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+                      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                      VK_IMAGE_ASPECT_DEPTH_BIT, _command_buffer);
 
-  change_image_layout(
-      g_buffer.albedo_buffer.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_IMAGE_ASPECT_COLOR_BIT,
-      _command_buffer);
-
-  change_image_layout(g_buffer.depth_buffer.image,
+  change_image_layout(shadow_pass.depth_attachment.image_allocation.image,
                       VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                       VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
                       VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
@@ -1364,26 +1204,27 @@ void Renderer::render_composite(VkCommandBuffer &command_buffer) {
                       VK_IMAGE_ASPECT_DEPTH_BIT, _command_buffer);
 
   float clear_value = 0.0f;
-  begin_render_pass(_render_pass, _framebuffers[_swapchain_img_idx],
+  begin_render_pass(composite_pass.render_pass,
+                    composite_pass.framebuffers[_swapchain_img_idx],
                     command_buffer, _window_dims, 1.0f, &clear_value, 1);
 
-  composite_pass_material.bind_descriptor_buffer(1, 0, _camera_buffer);
-  composite_pass_material.bind_descriptor_buffer(1, 1, _light_buffer);
-  composite_pass_material.ds_allocator.bind_image(
-      1, 2, _shadow_pass.image_allocation, _shadow_pass.layout,
-      _shadow_pass.sampler);
-  composite_pass_material.ds_allocator.bind_image(
-      1, 3, g_buffer.normal_buffer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-      g_buffer.sampler);
-  composite_pass_material.ds_allocator.bind_image(
-      1, 4, g_buffer.position_buffer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-      g_buffer.sampler);
-  composite_pass_material.ds_allocator.bind_image(
-      1, 5, g_buffer.albedo_buffer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-      g_buffer.sampler);
-  composite_pass_material.ds_allocator.bind_image(
-      1, 6, g_buffer.depth_buffer,
-      VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, g_buffer.sampler);
+  composite_pass.material.bind_descriptor_buffer(1, 0, _camera_buffer);
+  composite_pass.material.bind_descriptor_buffer(1, 1, _light_buffer);
+  composite_pass.material.ds_allocator.bind_image(
+      1, 2, shadow_pass.depth_attachment.image_allocation,
+      VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+      shadow_pass.depth_attachment.sampler);
+
+  for (int i = 0; i < deferred_pass.color_attachments.size(); i++) {
+    Attachment &attachment = deferred_pass.color_attachments[i];
+    composite_pass.material.ds_allocator.bind_image(
+        1, 3 + i, attachment.image_allocation,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, attachment.sampler);
+  }
+  composite_pass.material.ds_allocator.bind_image(
+      1, 6, deferred_pass.depth_attachment.image_allocation,
+      VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+      deferred_pass.depth_attachment.sampler);
 
   rend::ECS::EntityRegistry &registry = rend::ECS::get_entity_registry();
 
@@ -1395,12 +1236,12 @@ void Renderer::render_composite(VkCommandBuffer &command_buffer) {
                       1};
   VkRect2D scissor{0, 0, _window_dims.width, _window_dims.height};
   vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                    composite_pass_material.pipeline);
+                    composite_pass.material.pipeline);
   vkCmdBindDescriptorSets(
       command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-      composite_pass_material.pipeline_layout, 0,
-      composite_pass_material.ds_allocator.descriptor_sets.size(),
-      composite_pass_material.ds_allocator.descriptor_sets.data(), 0, nullptr);
+      composite_pass.material.pipeline_layout, 0,
+      composite_pass.material.ds_allocator.descriptor_sets.size(),
+      composite_pass.material.ds_allocator.descriptor_sets.data(), 0, nullptr);
 
   vkCmdSetViewport(_command_buffer, 0, 1, &viewport);
   vkCmdSetScissor(_command_buffer, 0, 1, &scissor);
@@ -1412,25 +1253,26 @@ void Renderer::render_composite(VkCommandBuffer &command_buffer) {
 }
 
 void Renderer::render_debug(VkCommandBuffer &command_buffer) {
-  debug_material.bind_descriptor_buffer(0, 0, _camera_buffer);
-  if (debug_renderable.debug_verts_to_draw == 0) {
+  if (composite_pass.debug_verts_to_draw == 0) {
     return;
   }
+  composite_pass.debug_material.bind_descriptor_buffer(0, 0, _camera_buffer);
 
-  debug_renderable.buffer.copy_from(debug_renderable.debug_buffer,
-                                    debug_renderable.debug_verts_to_draw * 6 *
-                                        sizeof(float));
+  composite_pass.buffer_allocation.copy_from(
+      composite_pass.debug_buffer,
+      composite_pass.debug_verts_to_draw * 6 * sizeof(float));
   VkDeviceSize offset = 0;
   vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                    debug_material.pipeline);
-  vkCmdBindVertexBuffers(command_buffer, 0, 1, &debug_renderable.buffer.buffer,
-                         &offset);
-  vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                          debug_material.pipeline_layout, 0,
-                          debug_material.ds_allocator.descriptor_sets.size(),
-                          debug_material.ds_allocator.descriptor_sets.data(), 0,
-                          nullptr);
-  vkCmdDraw(command_buffer, debug_renderable.debug_verts_to_draw, 1, 0, 0);
-  debug_renderable.debug_verts_to_draw = 0;
+                    composite_pass.debug_material.pipeline);
+  vkCmdBindVertexBuffers(command_buffer, 0, 1,
+                         &composite_pass.buffer_allocation.buffer, &offset);
+  vkCmdBindDescriptorSets(
+      command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+      composite_pass.debug_material.pipeline_layout, 0,
+      composite_pass.debug_material.ds_allocator.descriptor_sets.size(),
+      composite_pass.debug_material.ds_allocator.descriptor_sets.data(), 0,
+      nullptr);
+  vkCmdDraw(command_buffer, composite_pass.debug_verts_to_draw, 1, 0, 0);
+  composite_pass.debug_verts_to_draw = 0;
 }
 } // namespace rend

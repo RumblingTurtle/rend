@@ -53,13 +53,16 @@ struct MaterialSpec {
   VkPrimitiveTopology topology_type = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
   int vertex_stride = -1;
   std::vector<VkFormat> input_attributes = DEFAULT_INPUT_LAYOUT;
+
+  int color_attachment_count;
+  bool depth_test_enabled;
+  bool blend_test_enabled;
+
   VkPushConstantRange push_constants_description{
       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, //
       0,                                                         //
       sizeof(PushConstants)                                      //
   };
-
-  int color_attachment_count;
 };
 
 class Material {
@@ -82,9 +85,6 @@ public:
   VkPipeline pipeline;
 
   Material();
-
-  // Making sure not to share the same allocated resources
-  Material(const Material &other) = delete;
 
   Material(MaterialSpec spec);
 

@@ -14,6 +14,7 @@
 #include <vulkan/vulkan.h>
 
 #include <rend/Rendering/Vulkan/Mesh.h>
+#include <rend/Rendering/Vulkan/RenderPass.h>
 #include <rend/Rendering/Vulkan/Renderable.h>
 #include <rend/Rendering/Vulkan/vk_helper_types.h>
 #include <rend/Rendering/Vulkan/vk_struct_init.h>
@@ -38,27 +39,27 @@ class Renderer {
   VkSurfaceKHR _surface;
   VkQueue _graphics_queue;
   uint32_t _queue_family;
+  VkDeviceSize min_ubo_alignment;
+
+  int _frame_number = 0;
+  bool _initialized = false;
 
   VkDebugUtilsMessengerEXT _debug_messenger;
 
   // Swapchain
   VkSwapchainKHR _swapchain;
-  VkFormat _swapchain_image_format;
-
-  std::vector<VkImage> _swapchain_images;
-  std::vector<VkImageView> _swapchain_image_views;
   uint32_t _swapchain_img_idx; // Current swapchain image index
 
-  // Depth buffer
-  ImageAllocation _depth_image;
-
   // CMD buffer
-  VkCommandPool _cmd_pool;
+  VkCommandPool _command_pool;
   VkCommandBuffer _command_buffer;
 
-  // Renderpass
-  VkRenderPass _render_pass;
-  std::vector<VkFramebuffer> _framebuffers;
+  struct { // One time submit buffer
+    VkCommandPool pool;
+    VkFence fence;
+  } _submit_buffer;
+
+  VkDescriptorPool _descriptor_pool;
 
   // Sync primitives
   VkSemaphore _swapchain_semaphore; // Signaled when the next swapchain image
@@ -68,69 +69,36 @@ class Renderer {
 
   // VMA allocator
   VmaAllocator _allocator;
-
-  Deallocator _deallocator;
-
-  int _frame_number = 0;
-  bool _initialized = false;
-
-  VkDescriptorPool _descriptor_pool;
-
-  struct {
-    VkCommandPool pool;
-    VkFence fence;
-  } _submit_buffer;
-
-  VkDeviceSize min_ubo_alignment;
-
-  struct SubpassData {
-    VkRenderPass render_pass;
-    ImageAllocation image_allocation;
-    VkSampler sampler;
-    VkImageLayout layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
-    VkFramebuffer framebuffer;
-  };
-
-  SubpassData _shadow_pass;
+  Deallocator _deallocation_queue;
 
   BufferAllocation _camera_buffer;
   BufferAllocation _light_buffer;
 
 public:
+  RenderPass deferred_pass;
+  RenderPass shadow_pass;
+
   struct {
-    ImageAllocation normal_buffer;
-    ImageAllocation position_buffer;
-    ImageAllocation albedo_buffer;
+    std::vector<VkImage> images;
+    std::vector<VkImageView> image_views;
+
     ImageAllocation depth_buffer;
 
-    VkFramebuffer framebuffer;
     VkRenderPass render_pass;
-    VkSampler sampler;
+    std::vector<VkFramebuffer> framebuffers;
 
+    VkFormat color_format;
     VkFormat depth_format = VK_FORMAT_D32_SFLOAT;
-    VkFormat buffer_format = VK_FORMAT_R32G32B32A32_SFLOAT;
-
-    VkImageLayout buffer_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    VkImageLayout depth_layout =
-        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
     Material material;
-  } g_buffer;
 
-  Material composite_pass_material;
-  Material debug_material;
-  Material shadow_material;
-
-  struct DebugVertex {
-    float start[3];
-    float start_color[3];
-  };
-
-  struct {
-    BufferAllocation buffer;
-    float debug_buffer[MAX_DEBUG_VERTICES * sizeof(DebugVertex)];
+    BufferAllocation buffer_allocation;
+    // Position/Color
+    float debug_buffer[MAX_DEBUG_VERTICES * sizeof(float) * 6];
     int debug_verts_to_draw = 0;
-  } debug_renderable;
+    Material debug_material;
+
+  } composite_pass;
 
   std::unique_ptr<Camera> camera;
   std::vector<LightSource> lights;
@@ -138,11 +106,8 @@ public:
   std::unordered_map<Texture *, int> texture_to_index;
 
   bool debug_mode = false;
-  Renderer() {
-    camera = std::make_unique<Camera>(
-        90.f, _window_dims.width / _window_dims.height, 0.1f, 200.0f);
-    lights.resize(MAX_LIGHTS);
-  };
+
+  Renderer();
 
   bool init();
 

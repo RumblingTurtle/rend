@@ -40,10 +40,11 @@ public:
                       Shader &shader, VkPipelineLayout &pipeline_layout,
                       VertexInfoDescription vertex_info_description,
                       VkPrimitiveTopology topology, VkPipeline &new_pipeline,
-                      int color_attachment_count) {
+                      int color_attachment_count, bool depth_test_enabled,
+                      bool blend_test_enabled) {
     _vertex_info_description = vertex_info_description;
     _depth_stencil_create_info = vk_struct_init::get_depth_stencil_create_info(
-        true, true, VK_COMPARE_OP_LESS_OR_EQUAL);
+        depth_test_enabled, depth_test_enabled, VK_COMPARE_OP_LESS_OR_EQUAL);
     set_vertex_input_state_create_info();
     set_input_assembly_create_info(topology);
     // Configure the rasterizer to draw filled triangles
@@ -52,7 +53,7 @@ public:
     // we don't use multisampling, so just run the default one
     set_multisampling_state_create_info();
 
-    set_color_blending_info(color_attachment_count);
+    set_color_blending_info(color_attachment_count, blend_test_enabled);
 
     VkDynamicState dynamicState[2] = {VK_DYNAMIC_STATE_VIEWPORT,
                                       VK_DYNAMIC_STATE_SCISSOR};
@@ -97,13 +98,13 @@ public:
     }
   }
 
-  void set_color_blending_info(int color_attachment_count) {
+  void set_color_blending_info(int color_attachment_count, bool blend_enabled) {
     _color_blend_attachments.resize(color_attachment_count);
     for (auto &attachment : _color_blend_attachments) {
       attachment.colorWriteMask =
           VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
           VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-      attachment.blendEnable = VK_TRUE;
+      attachment.blendEnable = blend_enabled ? VK_TRUE : VK_FALSE;
 
       attachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
       attachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;

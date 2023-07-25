@@ -141,7 +141,7 @@ int main() {
   physics_system.init();
   rend::time::TimePoint t1 = rend::time::now();
   rend::time::TimePoint prev_time = t1;
-  double cam_pitch = 0, cam_yaw = -M_PI_4;
+  float cam_pitch = 0, cam_yaw = -M_PI_4;
   float dt = 0;
   while (input_handler.poll(dt)) {
     rend::time::TimePoint t2 = rend::time::now();
