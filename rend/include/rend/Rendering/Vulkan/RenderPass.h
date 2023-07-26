@@ -221,4 +221,68 @@ struct RenderPass {
       depth_attachment.destroy();
     }
   }
+
+  void bind_image_attachment(int set, int binding, Attachment &attachment) {
+    VkImageLayout layout =
+        attachment.spec.layout ==
+                VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+            ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
+            : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    material.ds_allocator.bind_image(set, binding, attachment.image_allocation,
+                                     layout, attachment.sampler);
+  }
+
+  void bind_buffer(int set, int binding, BufferAllocation &buffer) {
+    material.bind_descriptor_buffer(set, binding, buffer);
+  }
+
+  void change_image_layout(
+      VkImage &image, VkImageLayout old_layout, VkImageLayout new_layout,
+      VkAccessFlags src_access_flag, VkAccessFlags dst_access_flag,
+      VkPipelineStageFlags src_stage, VkPipelineStageFlags dst_stage,
+      VkImageAspectFlags aspect_mask, VkCommandBuffer command_buffer) {
+    VkImageSubresourceRange range;
+    range.aspectMask = aspect_mask;
+    range.baseMipLevel = 0;
+    range.levelCount = 1;
+    range.baseArrayLayer = 0;
+    range.layerCount = 1;
+
+    VkImageMemoryBarrier barrier_info = {};
+    barrier_info.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier_info.image = image;
+    barrier_info.subresourceRange = range;
+
+    barrier_info.oldLayout = old_layout;
+    barrier_info.newLayout = new_layout;
+
+    barrier_info.srcAccessMask = src_access_flag;
+    barrier_info.dstAccessMask = dst_access_flag;
+
+    vkCmdPipelineBarrier(command_buffer, src_stage, dst_stage, 0, 0, nullptr, 0,
+                         nullptr, 1, &barrier_info);
+  }
+
+  void make_attachments_readable(VkCommandBuffer command_buffer) {
+    for (int i = 0; i < color_attachments.size(); i++) {
+      change_image_layout(color_attachments[i].image_allocation.image,
+                          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                          VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                          VK_ACCESS_SHADER_READ_BIT,
+                          VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                          VK_IMAGE_ASPECT_COLOR_BIT, command_buffer);
+    }
+    if (depth_attachment.spec.active) {
+      change_image_layout(depth_attachment.image_allocation.image,
+                          VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                          VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+                          VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                          VK_ACCESS_SHADER_READ_BIT,
+                          VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+                          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                          VK_IMAGE_ASPECT_DEPTH_BIT, command_buffer);
+    }
+  }
 };

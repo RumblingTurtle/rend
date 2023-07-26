@@ -26,10 +26,10 @@ bool Shader::init(Path vertex_path, Path fragment_path) {
   fragment_file.open(_fragment_file_path, std::ios::ate | std::ios::binary);
   vertex_file.open(_vertex_file_path, std::ios::ate | std::ios::binary);
   if (!vertex_file.is_open() || !fragment_file.is_open()) {
-    std::cerr << "Failed to open shader files" << std::endl
-              << _fragment_file_path << std::endl
-              << _vertex_file_path << std::endl;
-    return false;
+    std::string error = "Failed to open shader files\n" +
+                        _fragment_file_path.native() + "\n" +
+                        _vertex_file_path.native() + "\n";
+    throw std::runtime_error(error.c_str());
   }
 
   size_t vert_file_size = vertex_file.tellg();

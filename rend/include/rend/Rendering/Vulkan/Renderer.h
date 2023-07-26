@@ -77,7 +77,9 @@ class Renderer {
 public:
   RenderPass deferred_pass;
   RenderPass shadow_pass;
+  RenderPass shading_pass;
   RenderPass screenspace_effects_pass;
+  RenderPass screenspace_smoothing_pass;
 
   struct {
     std::vector<VkImage> images;
@@ -165,16 +167,12 @@ public:
   void render_g_buffer(VkCommandBuffer &command_buffer);
   void render_screenspace_effects(VkCommandBuffer &command_buffer);
   void render_composite(VkCommandBuffer &command_buffer);
+  void render_shading(VkCommandBuffer &command_buffer);
+  void render_screenspace_smoothing(VkCommandBuffer &command_buffer);
   void render_debug(VkCommandBuffer &command_buffer);
 
   bool begin_shadow_pass();
   bool end_shadow_pass();
-
-  void change_image_layout(
-      VkImage &image, VkImageLayout old_layout, VkImageLayout new_layout,
-      VkAccessFlags src_access_flag, VkAccessFlags dst_access_flag,
-      VkPipelineStageFlags src_stage, VkPipelineStageFlags dst_stage,
-      VkImageAspectFlags aspect_mask, VkCommandBuffer command_buffer);
 
   bool draw();
 
@@ -185,6 +183,10 @@ public:
   bool init_deferred_pass();
 
   bool init_screenspace_pass();
+
+  bool init_shading_pass();
+
+  bool init_screenspace_smoothing_pass();
 
   // Debugging primitive drawing
   void draw_debug_line(const Eigen::Vector3f &start, const Eigen::Vector3f &end,
