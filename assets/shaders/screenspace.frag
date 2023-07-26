@@ -25,10 +25,10 @@ layout(push_constant) uniform PushConstants {
 }
 push_constants;
 
-#define REFLECTION_MARCHING_STEPS 256
-#define REFLECTION_MARCHING_STEP_SIZE 0.1f
-#define BIN_SEARCH_STEPS 16
-#define SURFACE_THICKNESS 0.00001f
+#define MARCHING_MAX_DIST 20.0f
+#define REFLECTION_MARCHING_STEP_COUNT 128
+#define BIN_SEARCH_STEPS 32
+#define SURFACE_THICKNESS 0.0002f
 
 mat4 VP_matrix = camera_info.projection * camera_info.view;
 vec3 get_ndc_coords(vec3 world_coords) {
@@ -50,41 +50,43 @@ vec4 get_reflection_albedo() {
   vec3 world_reflection_dir =
       reflect(view_dir, normalize(frag_world_normal.xyz));
 
+  vec3 ray_start_pos = get_ndc_coords(frag_world_pos.xyz);
+  ray_start_pos.xy = ray_start_pos.xy * 0.5f + 0.5f;
+
+  vec3 ray_end_pos = get_ndc_coords(frag_world_pos.xyz +
+                                    world_reflection_dir * MARCHING_MAX_DIST);
+  ray_end_pos.xy = clamp(ray_end_pos.xy * 0.5f + 0.5f, 0.0f, 1.0f);
+
+  vec3 ray_length = ray_end_pos - ray_start_pos;
+  vec3 ray_dir = normalize(ray_length);
+  float step_size = max(length(ray_length) / REFLECTION_MARCHING_STEP_COUNT,
+                        1.0f / textureSize(depth_texture, 0).x);
+  vec3 step_vector = ray_dir * step_size;
+
   int is_reflective = int(frag_world_normal.a) & 0x1;
-  for (int i = 1; i < REFLECTION_MARCHING_STEPS * is_reflective; i++) {
-    vec3 ray_pos = frag_world_pos.xyz + world_reflection_dir * float(i) *
-                                            REFLECTION_MARCHING_STEP_SIZE;
-    vec3 projected_point = get_ndc_coords(ray_pos);
+  for (int i = 1; i < REFLECTION_MARCHING_STEP_COUNT * is_reflective; i++) {
+    vec3 ray_pos = ray_start_pos.xyz + step_vector * float(i);
 
-    vec2 texture_pos = projected_point.xy * 0.5f + 0.5f;
-
-    if (texture_pos.x < 0.0 || texture_pos.x > 1.0 || texture_pos.y < 0.0 ||
-        texture_pos.y > 1.0 || projected_point.z > 1.0) {
+    if (ray_pos.x < 0.0 || ray_pos.x > 1.0 || ray_pos.y < 0.0 ||
+        ray_pos.y > 1.0) {
       break;
     }
 
-    float hit_depth = texture(depth_texture, texture_pos).r;
-
-    if (z_test(projected_point.z, hit_depth)) {
+    if (z_test(ray_pos.z, texture(depth_texture, ray_pos.xy).r)) {
       // Binary search for the exact point of intersection
-      vec3 projected_mid_point;
-
+      vec3 mid_point;
+      vec3 lower_bound = ray_pos - step_vector;
+      vec3 upper_bound = ray_pos;
       for (int j = 0; j < BIN_SEARCH_STEPS; j++) {
-        vec3 lower_bound =
-            ray_pos - world_reflection_dir * REFLECTION_MARCHING_STEP_SIZE;
-        vec3 upper_bound = ray_pos;
-        vec3 mid_point = mix(lower_bound, upper_bound, 0.5f);
-        projected_mid_point = get_ndc_coords(mid_point);
-        projected_mid_point.xy = projected_mid_point.xy * 0.5f + 0.5f;
-        if (z_test(projected_mid_point.z,
-                   texture(depth_texture, projected_mid_point.xy).r)) {
+        mid_point = mix(lower_bound, upper_bound, 0.5f);
+        if (z_test(mid_point.z, texture(depth_texture, mid_point.xy).r)) {
           upper_bound = mid_point;
         } else {
           lower_bound = mid_point;
         }
       }
 
-      return texture(shaded_texture, projected_mid_point.xy);
+      return texture(shaded_texture, mid_point.xy);
     }
   }
 

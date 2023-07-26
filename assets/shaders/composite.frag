@@ -33,7 +33,7 @@ mat3 SMOOTHING_KERNEL = {{1.0 / 16.0, 2.0 / 16.0, 1.0 / 16.0},
 
 float convolve(vec2 uv, mat3 convolution_mat, int channel, sampler2D tex) {
 
-  vec2 pixel_size = 1.0 / vec2(textureSize(tex, 0));
+  vec2 pixel_size = 1.0 / textureSize(tex, 0);
   float convolution_sum = 0.0;
   for (int i = -1; i < 2; i++) {
     for (int j = -1; j < 2; j++) {
