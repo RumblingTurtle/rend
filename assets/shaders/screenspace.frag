@@ -25,10 +25,11 @@ layout(push_constant) uniform PushConstants {
 }
 push_constants;
 
-#define MARCHING_MAX_DIST 20.0f
+#define MARCHING_MAX_DIST 100.0f
 #define REFLECTION_MARCHING_STEP_COUNT 128
 #define BIN_SEARCH_STEPS 32
 #define SURFACE_THICKNESS 0.0002f
+#define MIN_DISTANCE_TO_REFLECTION 20.0f
 
 mat4 VP_matrix = camera_info.projection * camera_info.view;
 vec3 get_ndc_coords(vec3 world_coords) {
@@ -46,7 +47,8 @@ vec4 get_reflection_albedo() {
   vec4 frag_world_normal = texture(world_normal_texture, screen_uv);
   vec4 frag_world_pos = texture(world_positions_texture, screen_uv);
   vec3 frag_pos_screen_space = get_ndc_coords(frag_world_pos.xyz);
-  vec3 view_dir = normalize(frag_world_pos.xyz - camera_info.position.xyz);
+  vec3 view_vector = frag_world_pos.xyz - camera_info.position.xyz;
+  vec3 view_dir = normalize(view_vector);
   vec3 world_reflection_dir =
       reflect(view_dir, normalize(frag_world_normal.xyz));
 
@@ -85,15 +87,50 @@ vec4 get_reflection_albedo() {
           lower_bound = mid_point;
         }
       }
-
-      return texture(shaded_texture, mid_point.xy);
+      float attenuation =
+          pow(min(length(view_vector), MIN_DISTANCE_TO_REFLECTION) /
+                  MIN_DISTANCE_TO_REFLECTION,
+              4);
+      return vec4(texture(shaded_texture, mid_point.xy).xyz, 1) * attenuation;
     }
   }
 
   return vec4(0.0);
 }
 
+#define SSAO_SAMPLE_COUNT 32
+#define SSAO_RADIUS 0.5f
+#define SSAO_BIAS 0.000001f
+
+float random(vec2 st) {
+  return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123);
+}
+
+vec4 get_occlusion_ratio() {
+  vec3 frag_position = texture(world_positions_texture, screen_uv).xyz;
+  vec3 normal = texture(world_normal_texture, screen_uv).xyz;
+  vec3 tangent = normalize(cross(normal, vec3(1.0, 0.0, 0.0)));
+  vec3 bitangent = normalize(cross(normal, tangent));
+  mat3 TBN = mat3(tangent, bitangent, normal);
+  float occluded_samples = 0;
+  for (int i = 0; i < SSAO_SAMPLE_COUNT; i++) {
+    vec3 random_sample =
+        vec3(random(bitangent.xy * vec2(12 * (i + 1)) +
+                    frag_position.xy * vec2(i + 1)),
+             random(tangent.yz * vec2(3 * i) + frag_position.zx * vec2(i + 1)),
+             random(normal.zx * vec2(35 * i) + frag_position.xy * vec2(i + 1)));
+
+    vec3 sample_pos = frag_position + TBN * random_sample * SSAO_RADIUS;
+    vec3 sample_uv = get_ndc_coords(sample_pos);
+    float sample_depth = texture(depth_texture, sample_uv.xy * 0.5f + 0.5f).r;
+    if (SSAO_BIAS > (sample_uv.z - sample_depth)) {
+      occluded_samples += 1;
+    }
+  }
+  return vec4(occluded_samples / SSAO_SAMPLE_COUNT);
+}
+
 void main() {
   out_reflection = get_reflection_albedo();
-  out_occlusion = vec4(1.0);
+  out_occlusion = get_occlusion_ratio();
 }
