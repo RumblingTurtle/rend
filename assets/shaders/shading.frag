@@ -113,15 +113,19 @@ void main() {
   float frag_depth = texture(depth, screen_uv).r;
   vec4 frag_color = texture(albedo_texture, screen_uv);
 
-  vec4 out_color = vec4(0);
+  vec4 light_contrib = vec4(0);
   for (int i = 0; i < 64; i++) {
     if (light_sources[i].color.w < 0) {
       continue;
     }
-    out_color.xyz += calculate_light_contrib(i, view_dir, frag_normal_world,
-                                             frag_pos_world) *
-                     shadow_test(i, frag_pos_world);
-  }
+    light_contrib.a += shadow_test(i, frag_pos_world);
 
-  out_frag_color = vec4(out_color.xyz * frag_color.xyz, 1);
+    light_contrib.xyz += calculate_light_contrib(i, view_dir, frag_normal_world,
+                                                 frag_pos_world) *
+                         min(1, light_contrib.a);
+  }
+  light_contrib = clamp(light_contrib, 0, 1);
+
+  out_frag_color =
+      vec4(light_contrib.xyz * frag_color.xyz * light_contrib.a, 1);
 }

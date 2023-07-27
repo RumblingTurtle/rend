@@ -31,7 +31,7 @@ push_constants;
 int BLUR_RANGE = (BLUR_WINDOW - 1) / 2;
 
 vec3 blur(vec2 uv, sampler2D tex) {
-  vec2 pixel_size = 1.0 / textureSize(tex, 0);
+  vec2 pixel_size = 1.0f / textureSize(tex, 0);
   vec3 convolution_sum = vec3(0.0);
   int sample_count = 0;
   for (int i = -BLUR_RANGE; i < BLUR_RANGE; i++) {
@@ -45,19 +45,16 @@ vec3 blur(vec2 uv, sampler2D tex) {
       sample_count++;
     }
   }
-  if (sample_count == 0) {
-    return vec3(0.0);
-  }
-  return convolution_sum / sample_count;
+
+  return (convolution_sum / float(sample_count) + 0.0001) *
+         max(sample_count, 1);
 }
 
 void main() {
-  vec4 reflection = vec4(blur(screen_uv, reflection_texture), 1.0f);
-  vec4 occlusion = vec4(blur(screen_uv, occlusion_texture), 1.0f);
-  out_frag_color = vec4(texture(shading, screen_uv).xyz, 1);
-  if (reflection.a > 0) {
-    out_frag_color = mix(out_frag_color, reflection, 0.2f);
-  }
-  out_frag_color = out_frag_color * occlusion;
+  out_frag_color.xyz =
+      texture(shading, screen_uv).xyz * blur(screen_uv, occlusion_texture);
+  out_frag_color.xyz =
+      mix(out_frag_color.xyz, blur(screen_uv, reflection_texture),
+          texture(reflection_texture, screen_uv).a * 0.2f);
   gl_FragDepth = texture(depth, screen_uv).r;
 }
