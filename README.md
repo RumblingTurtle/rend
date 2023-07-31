@@ -11,10 +11,11 @@ Vulkan based open-source, C++ game engine for 3D games
 As of now only tested on Ubuntu 20.04
 ## Requirements
 `Git submodules`
-- [*Jolt Physics*](https://github.com/jrouwe/JoltPhysics.git)
+- [*Jolt Physics*](https://github.com/jrouwe/JoltPhysics)
 - [*VulkanMemoryAllocator*](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator)
 - [*stb*](https://github.com/nothings/stb)
 - [*vk-bootstrap*](https://github.com/charles-lunarg/vk-bootstrap)
+- [*Dear ImGUI*](https://github.com/ocornut/imgui)
 
 `Ubuntu packages`
 - Eigen: ```libeigen3-dev```

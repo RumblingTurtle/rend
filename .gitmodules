@@ -10,3 +10,6 @@
 [submodule "JoltPhysics"]
 	path = JoltPhysics
 	url = https://github.com/jrouwe/JoltPhysics.git
+[submodule "imgui"]
+	path = imgui
+	url = https://github.com/ocornut/imgui.git

@@ -80,6 +80,31 @@ add_library(${CMAKE_PROJECT_NAME}
     ${${CMAKE_PROJECT_NAME}_SOURCES}
 )
 
+# Build IMGUI
+file(GLOB IMGUI_HEADERS 
+    "imgui/*.h"
+)
+
+file(GLOB IMGUI_SOURCES 
+    "imgui/*.cpp"
+    "imgui/backends/imgui_impl_vulkan.cpp"
+    "imgui/backends/imgui_impl_sdl2.cpp"
+)
+
+add_library(imgui
+    ${IMGUI_SOURCES}
+)
+
+target_include_directories(imgui PUBLIC
+    imgui/
+    ${SDL2_INCLUDE_DIRS}
+)
+
+target_link_libraries(imgui PUBLIC
+    SDL2
+)
+
+
 target_include_directories(${CMAKE_PROJECT_NAME} PUBLIC
     ${Vulkan_INCLUDE_DIRS}
     ${SDL2_INCLUDE_DIRS}
@@ -101,6 +126,7 @@ target_link_libraries(${CMAKE_PROJECT_NAME}  PUBLIC
     SDL2_mixer
     Jolt
     pthread
+    imgui
 )
 
 add_dependencies(${CMAKE_PROJECT_NAME} ${SHADER_TARGETS})
@@ -114,8 +140,6 @@ add_executable(${CMAKE_PROJECT_NAME}_example
 target_link_libraries(${CMAKE_PROJECT_NAME}_example
     ${CMAKE_PROJECT_NAME}
 )
-
-
 
 enable_testing()
 add_subdirectory(test)

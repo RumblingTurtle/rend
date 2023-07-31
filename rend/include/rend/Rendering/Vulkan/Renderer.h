@@ -31,7 +31,7 @@ class Renderer {
   static constexpr int SHADOW_ATLAS_RESOLUTION =
       SHADOW_ATLAS_LIGHTS_PER_ROW * SHADOW_MAP_RESOLUTION;
 
-  VkExtent2D _window_dims{1000, 1000};
+  VkExtent2D _window_dims{1280, 1024};
   SDL_Window *_window;
   VkInstance _instance;
   VkPhysicalDevice _physical_device;
@@ -40,6 +40,8 @@ class Renderer {
   VkQueue _graphics_queue;
   uint32_t _queue_family;
   VkDeviceSize min_ubo_alignment;
+
+  VkAllocationCallbacks *_allocation_callbacks;
 
   int _frame_number = 0;
   bool _initialized = false;
@@ -54,10 +56,7 @@ class Renderer {
   VkCommandPool _command_pool;
   VkCommandBuffer _command_buffer;
 
-  struct { // One time submit buffer
-    VkCommandPool pool;
-    VkFence fence;
-  } _submit_buffer;
+  VkFence _submit_fence;
 
   VkDescriptorPool _descriptor_pool;
 
@@ -109,43 +108,44 @@ public:
   std::unordered_map<Texture *, int> texture_to_index;
 
   bool debug_mode = false;
+  bool show_gui = false;
 
   Renderer();
 
-  bool init();
+  void init();
 
   // Initializes physical and logical devices + VBA
-  bool init_vulkan();
+  void init_vulkan();
 
   // Allocates swapchain, it's image buffers and image views into the buffers
-  bool init_swapchain();
+  void init_swapchain();
 
   // Allocates the depth image and it't view
-  bool init_z_buffer();
+  void init_z_buffer();
 
   // Initializes the command pool to be submitted to the graphics queue
-  bool init_cmd_buffer();
+  void init_cmd_buffer();
 
   // Defines the renderpass with all the subpasses and their attachments
-  bool init_renderpass();
+  void init_renderpass();
 
   // Render passes work on framebuffers not directly on image views
-  bool init_framebuffers();
+  void init_framebuffers();
 
   // Initializes semaphores and fences for syncronization with the gpu
-  bool init_sync_primitives();
+  void init_sync_primitives();
 
-  bool init_descriptor_pool();
+  void init_descriptor_pool();
 
-  bool init_debug_renderable();
+  void init_debug_renderable();
 
   // Starts submission command buffer recording
-  bool begin_one_time_submit();
+  void begin_one_time_submit();
 
   // Submits a command to _submit_buffer buffer
-  bool end_one_time_submit();
+  void end_one_time_submit();
 
-  bool init_materials();
+  void init_materials();
 
   // Check if renderables need to be allocated
   void check_renderables();
@@ -153,15 +153,15 @@ public:
   void bind_textures();
   void transfer_texture_to_gpu(Texture::Ptr texture);
 
-  bool begin_render_pass(VkRenderPass &render_pass, VkFramebuffer &framebuffer,
+  void begin_render_pass(VkRenderPass &render_pass, VkFramebuffer &framebuffer,
                          VkCommandBuffer &command_buffer,
                          const VkExtent2D &extent, float depth_clear_value,
                          float *color_clear_values,
                          int color_clear_values_count, float alpha_clear_value);
   void end_render_pass(VkCommandBuffer &command_buffer);
 
-  bool begin_command_buffer(VkCommandBuffer &command_buffer);
-  bool submit_command_buffer(VkCommandBuffer &command_buffer);
+  void begin_command_buffer(VkCommandBuffer &command_buffer);
+  void submit_command_buffer(VkCommandBuffer &command_buffer);
 
   void render_shadow_maps(VkCommandBuffer &command_buffer);
   void render_g_buffer(VkCommandBuffer &command_buffer);
@@ -170,23 +170,22 @@ public:
   void render_shading(VkCommandBuffer &command_buffer);
   void render_screenspace_smoothing(VkCommandBuffer &command_buffer);
   void render_debug(VkCommandBuffer &command_buffer);
+  void render_gui(VkCommandBuffer &command_buffer);
 
-  bool begin_shadow_pass();
-  bool end_shadow_pass();
+  void begin_shadow_pass();
+  void end_shadow_pass();
 
-  bool draw();
+  void draw();
 
   void cleanup();
 
-  bool init_shadow_pass();
+  void init_shadow_pass();
 
-  bool init_deferred_pass();
+  void init_deferred_pass();
 
-  bool init_screenspace_pass();
+  void init_screenspace_pass();
 
-  bool init_shading_pass();
-
-  bool init_screenspace_smoothing_pass();
+  void init_shading_pass();
 
   // Debugging primitive drawing
   void draw_debug_line(const Eigen::Vector3f &start, const Eigen::Vector3f &end,
@@ -201,9 +200,5 @@ public:
   void draw_debug_sphere(const Eigen::Vector3f &position, float radius,
                          int resolution, const Eigen::Vector3f &color);
 };
-
-static Renderer &get_renderer() {
-  static Renderer renderer{};
-  return renderer;
-}
+Renderer &get_renderer();
 } // namespace rend

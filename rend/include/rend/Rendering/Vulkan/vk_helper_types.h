@@ -46,17 +46,16 @@ struct BufferAllocation {
   }
 
   // Single copy
-  bool copy_from(void *data, size_t size, size_t offset = 0) {
+  void copy_from(void *data, size_t size, size_t offset = 0) {
     void *mapped_data;
     vmaMapMemory(allocator, allocation, &mapped_data);
     memcpy(mapped_data + offset, data, size);
     vmaUnmapMemory(allocator, allocation);
-    return true;
   }
 
   // Multiple copies with different sizes
   // data = [size1, size2, ... , sizeN]
-  bool copy_from(void *datas[], size_t sizes[], size_t num_datas) {
+  void copy_from(void *datas[], size_t sizes[], size_t num_datas) {
     void *mapped_data;
     vmaMapMemory(allocator, allocation, &mapped_data);
     int offset = 0;
@@ -65,7 +64,6 @@ struct BufferAllocation {
       offset += sizes[i];
     }
     vmaUnmapMemory(allocator, allocation);
-    return true;
   }
 
   bool valid() { return buffer != VK_NULL_HANDLE; }

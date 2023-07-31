@@ -34,12 +34,12 @@ public:
   }
 
   // Load shader code from files
-  bool init(Path vertex_path, Path fragment_path);
+  void init(Path vertex_path, Path fragment_path);
 
   // Destroy shader modules
   void deinit(VkDevice &_device);
 
-  bool build_shader_modules(VkDevice &_device);
+  void build_shader_modules(VkDevice &_device);
 
   VkPipelineShaderStageCreateInfo get_vertex_shader_stage_info();
 

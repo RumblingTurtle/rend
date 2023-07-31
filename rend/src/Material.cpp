@@ -4,7 +4,7 @@ Material::Material() {}
 
 Material::Material(MaterialSpec spec) : spec(spec) {}
 
-bool Material::build(VkDevice &device, VkDescriptorPool &descriptor_pool,
+void Material::build(VkDevice &device, VkDescriptorPool &descriptor_pool,
                      VkRenderPass &render_pass, const VkExtent2D &window_dims,
                      Deallocator &deallocation_queue) {
   ds_allocator.init(spec.bindings, device, descriptor_pool);
@@ -14,9 +14,8 @@ bool Material::build(VkDevice &device, VkDescriptorPool &descriptor_pool,
       spec.frag_shader.native().size() != 0) {
     shader = Shader(spec.vert_shader, spec.frag_shader);
   }
-  if (!shader.build_shader_modules(device)) {
-    return false;
-  }
+
+  shader.build_shader_modules(device);
 
   _pipeline_builder.build_pipeline_layout(
       device, spec.push_constants_description, ds_allocator, pipeline_layout);
@@ -35,7 +34,6 @@ bool Material::build(VkDevice &device, VkDescriptorPool &descriptor_pool,
   initialized = true;
   // Shader modules can be destroyed after pipeline creation
   shader.deinit(device);
-  return true;
 }
 
 void Material::bind_descriptor_buffer(int set_idx, int binding_idx,

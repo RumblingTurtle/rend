@@ -82,9 +82,8 @@ int main() {
   audio_player.load(Path{ASSET_DIRECTORY} / Path{"audio/dingus.mp3"});
   audio_player.loop = true;
 
-  if (!renderer.init()) {
-    return 1;
-  }
+  renderer.init();
+
   rend::input::InputHandler input_handler;
 
   rend::register_components();
@@ -157,6 +156,10 @@ int main() {
       renderer.debug_mode = !renderer.debug_mode;
     }
 
+    if (input_handler.is_key_pressed(rend::input::KeyCode::TAB)) {
+      renderer.show_gui = !renderer.show_gui;
+    }
+
     for (int i = 0; i < N_LIGHTS; i++) {
       LightSource &light = renderer.lights[i];
       Eigen::Vector3f light_right_vec = light.get_view_mat().col(0).head<3>();
@@ -166,26 +169,25 @@ int main() {
       light.set_direction(-light.get_position().normalized());
     }
 
-    // renderer.camera->position = renderer.lights[0].get_position();
-    // renderer.camera->lookat(Eigen::Vector3f::Zero());
+    if (!renderer.show_gui) {
+      renderer.camera->position +=
+          input_handler.is_key_held(rend::input::KeyCode::W) *
+              renderer.camera->forward() +
+          input_handler.is_key_held(rend::input::KeyCode::S) *
+              -renderer.camera->forward() +
+          input_handler.is_key_held(rend::input::KeyCode::D) *
+              renderer.camera->right() +
+          input_handler.is_key_held(rend::input::KeyCode::A) *
+              -renderer.camera->right();
 
-    renderer.camera->position +=
-        input_handler.is_key_held(rend::input::KeyCode::W) *
-            renderer.camera->forward() +
-        input_handler.is_key_held(rend::input::KeyCode::S) *
-            -renderer.camera->forward() +
-        input_handler.is_key_held(rend::input::KeyCode::D) *
-            renderer.camera->right() +
-        input_handler.is_key_held(rend::input::KeyCode::A) *
-            -renderer.camera->right();
+      cam_pitch += input_handler.m_dy * 0.01f;
+      cam_yaw += input_handler.m_dx * 0.01f;
+      cam_pitch = CLAMP(cam_pitch, -M_PI_2, M_PI_2);
 
-    cam_pitch += input_handler.m_dy * 0.01f;
-    cam_yaw += input_handler.m_dx * 0.01f;
-    cam_pitch = CLAMP(cam_pitch, -M_PI_2, M_PI_2);
-
-    renderer.camera->rotation = Eigen::Quaternionf{
-        Eigen::AngleAxisf{cam_yaw, Eigen::Vector3f::UnitY()} *
-        Eigen::AngleAxisf{cam_pitch, Eigen::Vector3f::UnitX()}};
+      renderer.camera->rotation = Eigen::Quaternionf{
+          Eigen::AngleAxisf{cam_yaw, Eigen::Vector3f::UnitY()} *
+          Eigen::AngleAxisf{cam_pitch, Eigen::Vector3f::UnitX()}};
+    }
 
     renderer.draw();
   }

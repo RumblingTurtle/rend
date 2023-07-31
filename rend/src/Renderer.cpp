@@ -1,5 +1,11 @@
 #include <rend/Rendering/Vulkan/Renderer.h>
 
+#include <imgui.h>
+#include <rend/GUI.h>
+
+#include <backends/imgui_impl_sdl2.h>
+#include <backends/imgui_impl_vulkan.h>
+
 namespace rend {
 
 Renderer::Renderer() {
@@ -14,10 +20,13 @@ void Renderer::cleanup() {
 
   // Wait for the command queue to complete if still running
   vkWaitForFences(_device, 1, &_command_complete_fence, VK_TRUE, 1000000000);
+  ImGui_ImplVulkan_Shutdown();
+  ImGui_ImplSDL2_Shutdown();
+  ImGui::DestroyContext();
   _deallocation_queue.cleanup();
 }
 
-bool Renderer::init() {
+void Renderer::init() {
   _window = SDL_CreateWindow("rend", SDL_WINDOWPOS_CENTERED,
                              SDL_WINDOWPOS_CENTERED, _window_dims.width,
                              _window_dims.height, SDL_WINDOW_VULKAN);
@@ -27,19 +36,54 @@ bool Renderer::init() {
 
   if (_window == nullptr) {
     std::cerr << "Failed to create _window: " << SDL_GetError() << std::endl;
-    return false;
   }
 
-  _initialized =
-      init_vulkan() && init_swapchain() && init_z_buffer() &&
-      init_cmd_buffer() && init_renderpass() && init_framebuffers() &&
-      init_sync_primitives() && init_descriptor_pool() &&
-      init_debug_renderable() && init_shadow_pass() && init_deferred_pass() &&
-      init_screenspace_pass() && init_shading_pass() && init_materials();
-  return _initialized;
+  init_vulkan();
+  init_swapchain();
+  init_z_buffer();
+  init_cmd_buffer();
+  init_renderpass();
+  init_framebuffers();
+  init_sync_primitives();
+  init_descriptor_pool();
+  init_debug_renderable();
+  init_shadow_pass();
+  init_deferred_pass();
+  init_screenspace_pass();
+  init_shading_pass();
+  init_materials();
+
+  // Setup Dear ImGui context
+  IMGUI_CHECKVERSION();
+  ImGui::CreateContext();
+  ImGuiIO &io = ImGui::GetIO();
+  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+
+  // Setup Platform/Renderer backends
+  ImGui_ImplSDL2_InitForVulkan(_window);
+  ImGui_ImplVulkan_InitInfo init_info = {};
+  init_info.Instance = _instance;
+  init_info.PhysicalDevice = _physical_device;
+  init_info.Device = _device;
+  init_info.QueueFamily = _queue_family;
+  init_info.Queue = _graphics_queue;
+  init_info.DescriptorPool = _descriptor_pool;
+  init_info.Subpass = 0;
+  init_info.MinImageCount = 2;
+  init_info.ImageCount = 2;
+  init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+  init_info.Allocator = _allocation_callbacks;
+  init_info.CheckVkResultFn = VK_CHECK;
+
+  ImGui_ImplVulkan_Init(&init_info, composite_pass.render_pass);
+
+  begin_one_time_submit();
+  ImGui_ImplVulkan_CreateFontsTexture(_command_buffer);
+  end_one_time_submit();
+  ImGui_ImplVulkan_DestroyFontUploadObjects();
 }
 
-bool Renderer::init_vulkan() {
+void Renderer::init_vulkan() {
   vkb::InstanceBuilder builder;
   vkb::Result<vkb::Instance> inst_ret = builder.set_app_name("rend")
                                             .request_validation_layers()
@@ -48,12 +92,14 @@ bool Renderer::init_vulkan() {
   if (!inst_ret) {
     std::cerr << "Failed to create Vulkan _instance. Error: "
               << inst_ret.error().message() << "\n";
-    return false;
+    abort();
+    return;
   }
 
   vkb::Instance vkb_inst = inst_ret.value();
   _instance = vkb_inst.instance;
   _debug_messenger = vkb_inst.debug_messenger;
+  _allocation_callbacks = vkb_inst.allocation_callbacks;
 
   // Setting up devices and surfaces
   SDL_Vulkan_CreateSurface(_window, _instance, &_surface);
@@ -104,11 +150,9 @@ bool Renderer::init_vulkan() {
     _camera_buffer.destroy();
     _light_buffer.destroy();
   });
-
-  return true;
 }
 
-bool Renderer::init_materials() {
+void Renderer::init_materials() {
   { // Composite pass
     MaterialSpec mat_spec{};
     mat_spec.depth_test_enabled = true;
@@ -184,11 +228,9 @@ bool Renderer::init_materials() {
                                         composite_pass.render_pass,
                                         _window_dims, _deallocation_queue);
   }
-
-  return true;
 }
 
-bool Renderer::init_swapchain() {
+void Renderer::init_swapchain() {
   vkb::SwapchainBuilder chainBuilder{_physical_device, _device, _surface};
   vkb::Swapchain vkb_swapchain =
       chainBuilder.use_default_format_selection()
@@ -204,10 +246,9 @@ bool Renderer::init_swapchain() {
 
   _deallocation_queue.push(
       [=] { vkDestroySwapchainKHR(_device, _swapchain, nullptr); });
-  return true;
 }
 
-bool Renderer::init_z_buffer() {
+void Renderer::init_z_buffer() {
   VkImageCreateInfo image_info = vk_struct_init::get_image_create_info(
       composite_pass.depth_format, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
       VkExtent3D{_window_dims.width, _window_dims.height, 1}, VK_IMAGE_TYPE_2D);
@@ -225,10 +266,9 @@ bool Renderer::init_z_buffer() {
       image_info, image_view_info, alloc_info, _device, _allocator);
 
   _deallocation_queue.push([=] { composite_pass.depth_buffer.destroy(); });
-  return true;
 }
 
-bool Renderer::init_cmd_buffer() {
+void Renderer::init_cmd_buffer() {
   VkCommandPoolCreateInfo cmd_pool_info =
       vk_struct_init::get_command_pool_create_info(
           _queue_family, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
@@ -236,9 +276,6 @@ bool Renderer::init_cmd_buffer() {
   VK_CHECK(
       vkCreateCommandPool(_device, &cmd_pool_info, nullptr, &_command_pool),
       "Failed to create command pool");
-  VK_CHECK(vkCreateCommandPool(_device, &cmd_pool_info, nullptr,
-                               &_submit_buffer.pool),
-           "Failed to create command pool");
 
   VkCommandBufferAllocateInfo cmd_buffer_info =
       vk_struct_init::get_command_buffer_allocate_info(
@@ -248,15 +285,11 @@ bool Renderer::init_cmd_buffer() {
       vkAllocateCommandBuffers(_device, &cmd_buffer_info, &_command_buffer),
       "Failed to allocate command buffer");
 
-  _deallocation_queue.push([=] {
-    vkDestroyCommandPool(_device, _submit_buffer.pool, nullptr);
-    vkDestroyCommandPool(_device, _command_pool, nullptr);
-  });
-
-  return true;
+  _deallocation_queue.push(
+      [=] { vkDestroyCommandPool(_device, _command_pool, nullptr); });
 }
 
-bool Renderer::init_deferred_pass() {
+void Renderer::init_deferred_pass() {
   AttachmentSpec color_attachment;
   color_attachment.active = true;
   color_attachment.format = VK_FORMAT_R32G32B32A32_SFLOAT;
@@ -333,10 +366,9 @@ bool Renderer::init_deferred_pass() {
                                _deallocation_queue);
 
   _deallocation_queue.push([=] { deferred_pass.destroy(); });
-  return true;
 }
 
-bool Renderer::init_screenspace_pass() {
+void Renderer::init_screenspace_pass() {
   AttachmentSpec color_attachment;
   color_attachment.active = true;
   color_attachment.format = VK_FORMAT_R32G32B32A32_SFLOAT;
@@ -415,10 +447,9 @@ bool Renderer::init_screenspace_pass() {
       pass_spec.extent, _deallocation_queue);
 
   _deallocation_queue.push([=] { screenspace_effects_pass.destroy(); });
-  return true;
 }
 
-bool Renderer::init_shading_pass() {
+void Renderer::init_shading_pass() {
   RenderPass &pass = shading_pass;
   AttachmentSpec color_attachment;
   color_attachment.active = true;
@@ -498,12 +529,9 @@ bool Renderer::init_shading_pass() {
                       pass_spec.extent, _deallocation_queue);
 
   _deallocation_queue.push([&] { pass.destroy(); });
-  return true;
 }
 
-bool Renderer::init_screenspace_smoothing_pass() {}
-
-bool Renderer::init_renderpass() {
+void Renderer::init_renderpass() {
   VkAttachmentDescription color_attachment =
       vk_struct_init::get_attachment_description(
           composite_pass.color_format,      //
@@ -596,10 +624,9 @@ bool Renderer::init_renderpass() {
   _deallocation_queue.push([=]() {
     vkDestroyRenderPass(_device, composite_pass.render_pass, nullptr);
   });
-  return true;
 }
 
-bool Renderer::init_framebuffers() {
+void Renderer::init_framebuffers() {
   // Framebuffers are connections between renderpass and images
   VkFramebufferCreateInfo fb_info = {};
   fb_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
@@ -627,11 +654,9 @@ bool Renderer::init_framebuffers() {
       vkDestroyImageView(_device, composite_pass.image_views[i], nullptr);
     });
   }
-
-  return true;
 }
 
-bool Renderer::init_sync_primitives() {
+void Renderer::init_sync_primitives() {
   VkSemaphoreCreateInfo semaphore_info = {};
   semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
   semaphore_info.pNext = nullptr;
@@ -653,20 +678,18 @@ bool Renderer::init_sync_primitives() {
       vkCreateFence(_device, &fence_info, nullptr, &_command_complete_fence),
       "Failed to create render fence");
 
-  VK_CHECK(vkCreateFence(_device, &fence_info, nullptr, &_submit_buffer.fence),
+  VK_CHECK(vkCreateFence(_device, &fence_info, nullptr, &_submit_fence),
            "Failed to create submit fence");
 
   _deallocation_queue.push([=] {
     vkDestroySemaphore(_device, _swapchain_semaphore, nullptr);
     vkDestroySemaphore(_device, _render_complete_semaphore, nullptr);
     vkDestroyFence(_device, _command_complete_fence, nullptr);
-    vkDestroyFence(_device, _submit_buffer.fence, nullptr);
+    vkDestroyFence(_device, _submit_fence, nullptr);
   });
-
-  return true;
 }
 
-bool Renderer::init_descriptor_pool() {
+void Renderer::init_descriptor_pool() {
   VkDescriptorPoolCreateInfo pool_info = {};
 
   VkDescriptorPoolSize scene = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 500};
@@ -681,24 +704,20 @@ bool Renderer::init_descriptor_pool() {
   pool_info.maxSets = 20;
   pool_info.poolSizeCount = sizeof(pool_sizes) / sizeof(VkDescriptorPoolSize);
   pool_info.pPoolSizes = pool_sizes;
-  if (vkCreateDescriptorPool(_device, &pool_info, nullptr, &_descriptor_pool) !=
-      VK_SUCCESS) {
-    return false;
-  }
+  VK_CHECK(
+      vkCreateDescriptorPool(_device, &pool_info, nullptr, &_descriptor_pool),
+      "Failed to create descriptor pool");
 
   _deallocation_queue.push(
       [=] { vkDestroyDescriptorPool(_device, _descriptor_pool, nullptr); });
-  return true;
 }
 
-bool Renderer::init_debug_renderable() {
+void Renderer::init_debug_renderable() {
   composite_pass.buffer_allocation = BufferAllocation::create(
       3 * sizeof(float) * MAX_DEBUG_VERTICES, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
       VMA_MEMORY_USAGE_CPU_TO_GPU, _allocator);
 
   _deallocation_queue.push([&] { composite_pass.buffer_allocation.destroy(); });
-
-  return true;
 }
 
 void Renderer::draw_debug_line(const Eigen::Vector3f &start,
@@ -804,20 +823,19 @@ void Renderer::draw_debug_sphere(const Eigen::Vector3f &position, float radius,
   }
 }
 
-bool Renderer::begin_one_time_submit() {
+void Renderer::begin_one_time_submit() {
   VK_CHECK(vkResetCommandBuffer(_command_buffer, 0),
            "Failed to reset command buffer");
   VkCommandBufferBeginInfo cmd_buffer_info = {};
   cmd_buffer_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   cmd_buffer_info.pNext = nullptr;
   cmd_buffer_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  vkResetFences(_device, 1, &_submit_buffer.fence);
+  vkResetFences(_device, 1, &_submit_fence);
   VK_CHECK(vkBeginCommandBuffer(_command_buffer, &cmd_buffer_info),
            "Failed to begin command buffer");
-  return true;
 }
 
-bool Renderer::end_one_time_submit() {
+void Renderer::end_one_time_submit() {
   VK_CHECK(vkEndCommandBuffer(_command_buffer), "Failed to end command buffer");
 
   VkSubmitInfo submit = {};
@@ -832,14 +850,13 @@ bool Renderer::end_one_time_submit() {
   submit.signalSemaphoreCount = 0;
   submit.pSignalSemaphores = nullptr;
 
-  VK_CHECK(vkQueueSubmit(_graphics_queue, 1, &submit, _submit_buffer.fence),
+  VK_CHECK(vkQueueSubmit(_graphics_queue, 1, &submit, _submit_fence),
            "Failed to submit to queue");
-  vkWaitForFences(_device, 1, &_submit_buffer.fence, true, 9999999999);
-  vkResetCommandPool(_device, _submit_buffer.pool, 0);
-  return true;
+  vkWaitForFences(_device, 1, &_submit_fence, true, 9999999999);
+  vkResetCommandPool(_device, _command_pool, 0);
 }
 
-bool Renderer::begin_command_buffer(VkCommandBuffer &command_buffer) {
+void Renderer::begin_command_buffer(VkCommandBuffer &command_buffer) {
   // Wait for the command queue to complete
   VK_CHECK(vkWaitForFences(_device, 1, &_command_complete_fence, VK_TRUE,
                            1000000000),
@@ -861,11 +878,9 @@ bool Renderer::begin_command_buffer(VkCommandBuffer &command_buffer) {
   cmd_buffer_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   VK_CHECK(vkBeginCommandBuffer(command_buffer, &cmd_buffer_info),
            "Failed to begin command buffer");
-
-  return true;
 }
 
-bool Renderer::begin_render_pass(
+void Renderer::begin_render_pass(
     VkRenderPass &render_pass, VkFramebuffer &framebuffer,
     VkCommandBuffer &command_buffer, const VkExtent2D &extent,
     float depth_clear_value, float *color_clear_values,
@@ -898,14 +913,13 @@ bool Renderer::begin_render_pass(
   rp_info.framebuffer = framebuffer;
 
   vkCmdBeginRenderPass(command_buffer, &rp_info, VK_SUBPASS_CONTENTS_INLINE);
-  return true;
 }
 
 void Renderer::end_render_pass(VkCommandBuffer &command_buffer) {
   vkCmdEndRenderPass(command_buffer);
 }
 
-bool Renderer::submit_command_buffer(VkCommandBuffer &command_buffer) {
+void Renderer::submit_command_buffer(VkCommandBuffer &command_buffer) {
   VK_CHECK(vkEndCommandBuffer(_command_buffer), "Failed to end command buffer");
 
   // Submit command to the render queue
@@ -958,7 +972,6 @@ bool Renderer::submit_command_buffer(VkCommandBuffer &command_buffer) {
 
   VK_CHECK(vkQueuePresentKHR(_graphics_queue, &present_info),
            "Failed to present image");
-  return true;
 }
 
 // Allocate and transfer
@@ -1029,7 +1042,7 @@ void Renderer::transfer_texture_to_gpu(Texture::Ptr p_texture) {
   staging_buffer.destroy(); // We don't need the staging buffer anymore
 }
 
-bool Renderer::init_shadow_pass() {
+void Renderer::init_shadow_pass() {
   std::vector<AttachmentSpec> color_attachments;
 
   AttachmentSpec depth_attachment;
@@ -1091,8 +1104,6 @@ bool Renderer::init_shadow_pass() {
                              pass_spec.extent, _deallocation_queue);
 
   _deallocation_queue.push([=]() { shadow_pass.destroy(); });
-
-  return true;
 }
 
 void Renderer::check_renderables() {
@@ -1134,7 +1145,7 @@ void Renderer::check_renderables() {
   }
 }
 
-bool Renderer::draw() {
+void Renderer::draw() {
   Eigen::Matrix4f projection = camera->projection;
   Eigen::Matrix4f view = camera->get_view_matrix();
 
@@ -1159,7 +1170,6 @@ bool Renderer::draw() {
 
   submit_command_buffer(_command_buffer);
   _frame_number++;
-  return true;
 }
 
 void Renderer::bind_textures() {
@@ -1323,6 +1333,7 @@ void Renderer::render_g_buffer(VkCommandBuffer &command_buffer) {
                        sizeof(PushConstants), &constants);
     vkCmdDraw(command_buffer, renderable.p_mesh->vertex_count(), 1, 0, 0);
   }
+
   end_render_pass(command_buffer);
 
   deferred_pass.make_attachments_readable(command_buffer);
@@ -1473,6 +1484,8 @@ void Renderer::render_composite(VkCommandBuffer &command_buffer) {
 
   render_debug(command_buffer);
 
+  render_gui(command_buffer);
+
   end_render_pass(command_buffer);
 }
 
@@ -1498,5 +1511,22 @@ void Renderer::render_debug(VkCommandBuffer &command_buffer) {
       nullptr);
   vkCmdDraw(command_buffer, composite_pass.debug_verts_to_draw, 1, 0, 0);
   composite_pass.debug_verts_to_draw = 0;
+}
+
+void Renderer::render_gui(VkCommandBuffer &command_buffer) {
+  if (!show_gui) {
+    return;
+  }
+  ImGui_ImplVulkan_NewFrame();
+  ImGui_ImplSDL2_NewFrame();
+  ImGui::NewFrame();
+  get_GUI().draw();
+  ImGui::Render();
+  ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), command_buffer);
+}
+
+Renderer &get_renderer() {
+  static Renderer renderer{};
+  return renderer;
 }
 } // namespace rend

@@ -90,7 +90,7 @@ public:
   Material(MaterialSpec spec);
 
   // Initialization
-  bool build(VkDevice &device, VkDescriptorPool &descriptor_pool,
+  void build(VkDevice &device, VkDescriptorPool &descriptor_pool,
              VkRenderPass &render_pass, const VkExtent2D &window_dims,
              Deallocator &deallocation_queue);
 

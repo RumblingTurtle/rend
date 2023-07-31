@@ -16,7 +16,7 @@ Shader::get_shader_stage_info(VkShaderStageFlagBits stage,
   return info;
 }
 
-bool Shader::init(Path vertex_path, Path fragment_path) {
+void Shader::init(Path vertex_path, Path fragment_path) {
   _vertex_file_path = vertex_path;
   _fragment_file_path = fragment_path;
 
@@ -45,10 +45,9 @@ bool Shader::init(Path vertex_path, Path fragment_path) {
   fragment_file.seekg(0);
   fragment_file.read((char *)_fragment_code.data(), frag_file_size);
   fragment_file.close();
-  return true;
 }
 
-bool Shader::build_shader_modules(VkDevice &_device) {
+void Shader::build_shader_modules(VkDevice &_device) {
   _built_modules = true;
   VkShaderModuleCreateInfo vertex_info{};
   vertex_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -66,7 +65,6 @@ bool Shader::build_shader_modules(VkDevice &_device) {
   VK_CHECK(
       vkCreateShaderModule(_device, &fragment_info, nullptr, &_fragment_module),
       "Failed to create fragment shader module");
-  return true;
 }
 
 void Shader::deinit(VkDevice &_device) {

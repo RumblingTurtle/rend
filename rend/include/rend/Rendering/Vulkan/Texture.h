@@ -37,7 +37,7 @@ struct Texture {
   Texture(Path path);
   Texture(VkExtent3D dims) { this->dims = dims; } // Empty texture
 
-  bool allocate_image(VkDevice &device, VmaAllocator &allocator,
+  void allocate_image(VkDevice &device, VmaAllocator &allocator,
                       Deallocator &deallocator_queue);
 
   bool image_allocated() { return image_allocation.buffer_allocated; }

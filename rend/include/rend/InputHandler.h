@@ -16,6 +16,7 @@ enum KeyCode {
   D,
   R,
   F,
+  TAB,
   KEY_CODE_COUNT
 };
 
@@ -29,6 +30,7 @@ static std::unordered_map<SDL_Scancode, KeyCode> SDL_TO_IH_KEYMAP = {
     {SDL_SCANCODE_D, KeyCode::D},          //
     {SDL_SCANCODE_R, KeyCode::R},          //
     {SDL_SCANCODE_F, KeyCode::F},          //
+    {SDL_SCANCODE_TAB, KeyCode::TAB},      //
 };
 
 static std::unordered_map<KeyCode, SDL_Scancode> IH_TO_SDL_KEYMAP = []() {
@@ -40,7 +42,6 @@ static std::unordered_map<KeyCode, SDL_Scancode> IH_TO_SDL_KEYMAP = []() {
 }();
 
 struct InputHandler {
-
   bool key_pressed[KEY_CODE_COUNT];
   bool key_held[KEY_CODE_COUNT];
   bool key_released[KEY_CODE_COUNT];

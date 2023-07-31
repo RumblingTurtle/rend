@@ -23,7 +23,7 @@ PixelBuffer::~PixelBuffer() {
 
 Texture::Texture(Path path) : pixel_buffer(path) { dims = pixel_buffer.dims; }
 
-bool Texture::allocate_image(VkDevice &device, VmaAllocator &allocator,
+void Texture::allocate_image(VkDevice &device, VmaAllocator &allocator,
                              Deallocator &deallocator_queue) {
   VkSamplerCreateInfo sampler_info =
       vk_struct_init::get_sampler_create_info(filter, address_mode);
@@ -49,5 +49,4 @@ bool Texture::allocate_image(VkDevice &device, VmaAllocator &allocator,
                                              allocinfo, device, allocator);
 
   deallocator_queue.push([=] { image_allocation.destroy(); });
-  return true;
 }

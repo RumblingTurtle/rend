@@ -1,5 +1,8 @@
 #include <rend/InputHandler.h>
 
+#include <backends/imgui_impl_sdl2.h>
+#include <backends/imgui_impl_vulkan.h>
+
 namespace rend::input {
 InputHandler::InputHandler() {
   memset(hold_time, 0, sizeof(hold_time));
@@ -17,6 +20,7 @@ bool InputHandler::poll(float dt) {
 
   SDL_Event event;
   while (SDL_PollEvent(&event)) {
+    ImGui_ImplSDL2_ProcessEvent(&event); // Forward your event to backend
     if (event.type == SDL_QUIT) {
       return false;
     }
@@ -28,7 +32,6 @@ bool InputHandler::poll(float dt) {
   if (is_key_pressed(KeyCode::ESC)) {
     return false;
   }
-
   return true;
 }
 

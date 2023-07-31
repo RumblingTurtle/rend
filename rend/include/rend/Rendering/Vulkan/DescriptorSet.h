@@ -21,7 +21,7 @@ struct DescriptorSetAssembler {
   VkDevice device;
 
   // Creates a set with N bindings
-  bool assemble_layout(std::vector<Binding> &bindings,
+  void assemble_layout(std::vector<Binding> &bindings,
                        VkDevice device) { // Move assembled descriptors into the
                                           // descriptor set
     std::vector<VkDescriptorSetLayoutBinding> descriptor_set_layout_bindings;
@@ -49,8 +49,6 @@ struct DescriptorSetAssembler {
     VK_CHECK(vkCreateDescriptorSetLayout(device, &layout_info, nullptr,
                                          &descriptor_set_layout),
              "Failed to create descriptor set layout");
-
-    return true;
   }
 
   void destroy() {

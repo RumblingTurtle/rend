@@ -1,11 +1,26 @@
 #pragma once
 #include <iostream>
+#include <vulkan/vulkan.h>
 
-#define VK_CHECK(x, err)                                                       \
-  if (x != VK_SUCCESS && x != VK_TIMEOUT) {                                    \
-    std::cerr << err << std::endl << x << std::endl;                           \
-    return false;                                                              \
+static void VK_CHECK(VkResult err) {
+  if (err == 0) {
+    return;
   }
+  fprintf(stderr, "[vulkan] Error: VkResult = %d\n", err);
+  if (err < 0) {
+    abort();
+  }
+}
+
+static void VK_CHECK(VkResult err, const char *msg) {
+  if (err == 0) {
+    return;
+  }
+  fprintf(stderr, "[vulkan] Error: VkResult = %d\n %s", err, msg);
+  if (err < 0) {
+    abort();
+  }
+}
 
 #define CLAMP(x, low, high)                                                    \
   (((x) > (high)) ? (high) : (((x) < (low)) ? (low) : (x)))
