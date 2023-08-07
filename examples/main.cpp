@@ -5,6 +5,7 @@
 #include <rend/Rendering/Vulkan/Renderable.h>
 #include <rend/Transform.h>
 
+#include <rend/AssetImporter.h>
 #include <rend/Audio/AudioPlayer.h>
 #include <rend/EntityRegistry.h>
 #include <rend/Systems/DebugBufferFillSystem.h>
@@ -117,9 +118,26 @@ int main() {
       Eigen::Vector3f{50.0f, 1.0f, 50.0f}, Texture::get_error_texture(),
       rend::Primitive::BOX, true, true);
 
+  {
+    rend::ECS::EntityRegistry &registry = rend::ECS::get_entity_registry();
+    rend::ECS::EID eid = registry.register_entity();
+    Transform &transform = registry.add_component<Transform>(eid);
+    Renderable &renderable = registry.add_component<Renderable>(eid);
+    Rigidbody &rigidbody = registry.add_component<Rigidbody>(eid);
+    renderable.reflective = true;
+    renderable.type = RenderableType::Geometry;
+    rend::AssetImporter importer{Path{ASSET_DIRECTORY} /
+                                 Path{"models/jimbo.fbx"}};
+    renderable.p_mesh = std::make_shared<Mesh>(Path{ASSET_DIRECTORY} /
+                                               Path{"models/jimbo.fbx"});
+    renderable.p_texture = std::make_shared<Texture>(
+        importer.get_mesh_texture("MocapGuy_Body", 0));
+    transform.position = Eigen::Vector3f{0, 10.0f, 0};
+    transform.scale = Eigen::Vector3f{0.1f, 0.1f, 0.1f};
+  }
   // audio_player.play();
 
-  int N_LIGHTS = 32;
+  int N_LIGHTS = 6;
   int light_speeds[N_LIGHTS];
 
   for (int i = 0; i < N_LIGHTS; i++) {
@@ -128,7 +146,8 @@ int main() {
     light.set_color(Eigen::Vector3f{rand_float(0.2, 1), rand_float(0.2, 1),
                                     rand_float(0.2, 1)});
     light.set_position(
-        Eigen::Vector3f{rand_float(-50, 50), 10.0f, rand_float(-50, 50)});
+        Eigen::Vector3f{rand_float(-50, 50), 10.0f, rand_float(-50, 50)} +
+        Eigen::Vector3f{5, 0, 5});
     light.set_fov(M_PI * 0.3f);
     light.set_direction(-light.get_position().normalized());
     light_speeds[i] = rand_float(-100, 100);

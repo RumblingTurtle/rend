@@ -6,11 +6,10 @@
 #include <stb_image.h>
 #include <vector>
 #include <vk_mem_alloc.h>
-
 // Loaded texture data
 struct PixelBuffer {
   Path texture_path;
-  unsigned char *pixels = nullptr;
+  std::vector<unsigned char> pixels;
   VkExtent3D dims; // Width, height, depth
   bool empty = true;
 
@@ -18,14 +17,13 @@ struct PixelBuffer {
 
   PixelBuffer() = default;
   PixelBuffer(Path path);
-  ~PixelBuffer();
+  PixelBuffer(std::vector<unsigned char> pixels, int width, int height);
 };
 
 struct Texture {
   typedef std::shared_ptr<Texture> Ptr;
 
   PixelBuffer pixel_buffer;
-  VkExtent3D dims; // Width, height, depth
 
   ImageAllocation image_allocation;
   VkSampler sampler;
@@ -35,7 +33,7 @@ struct Texture {
   VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
   Texture(Path path);
-  Texture(VkExtent3D dims) { this->dims = dims; } // Empty texture
+  Texture(PixelBuffer &pixel_buffer);
 
   void allocate_image(VkDevice &device, VmaAllocator &allocator,
                       Deallocator &deallocator_queue);

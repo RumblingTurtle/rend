@@ -91,6 +91,14 @@ file(GLOB IMGUI_SOURCES
     "imgui/backends/imgui_impl_sdl2.cpp"
 )
 
+add_library(lodepng
+    "lodepng/lodepng.cpp"
+)
+target_include_directories(lodepng PUBLIC
+    lodepng
+)
+
+
 add_library(imgui
     ${IMGUI_SOURCES}
 )
@@ -127,6 +135,7 @@ target_link_libraries(${CMAKE_PROJECT_NAME}  PUBLIC
     Jolt
     pthread
     imgui
+    lodepng
 )
 
 add_dependencies(${CMAKE_PROJECT_NAME} ${SHADER_TARGETS})

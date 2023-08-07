@@ -981,7 +981,7 @@ void Renderer::transfer_texture_to_gpu(Texture::Ptr p_texture) {
       p_texture->pixel_buffer.size(), VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
       VMA_MEMORY_USAGE_CPU_TO_GPU, _allocator);
 
-  staging_buffer.copy_from((void *)p_texture->pixel_buffer.pixels,
+  staging_buffer.copy_from((void *)p_texture->pixel_buffer.pixels.data(),
                            p_texture->pixel_buffer.size());
 
   // Change the layout of the texture to be linear as the staging buffer
@@ -1012,8 +1012,8 @@ void Renderer::transfer_texture_to_gpu(Texture::Ptr p_texture) {
   copyRegion.bufferOffset = 0;
   copyRegion.bufferRowLength = 0;
   copyRegion.bufferImageHeight = 0;
-  copyRegion.imageExtent =
-      VkExtent3D{p_texture->dims.width, p_texture->dims.height, 1};
+  copyRegion.imageExtent = VkExtent3D{p_texture->pixel_buffer.dims.width,
+                                      p_texture->pixel_buffer.dims.height, 1};
 
   copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
   copyRegion.imageSubresource.mipLevel = 0;

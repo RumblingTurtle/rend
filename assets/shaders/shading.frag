@@ -61,7 +61,7 @@ float shadow_test(int light_idx, vec4 frag_pos_world) {
     float closest_depth =
         texture(shadow_texture, shadow_coords_renormalized + atlas_offset).r;
     float current_depth = shadow_coords.z;
-    shadow = current_depth - DEPTH_BIAS > closest_depth ? 0.0f : 1.0f;
+    shadow = (current_depth - DEPTH_BIAS) > closest_depth ? 0.0f : 1.0f;
   }
   return shadow;
 }
@@ -102,7 +102,7 @@ vec3 calculate_light_contrib(int light_idx, vec3 view_dir,
       soft_cutoff * 1.0f /
       (1.0f + 0.001 * distance + 0.0001 * (distance * distance));
 
-  return ambient + diffuse * attenuation + specular * attenuation;
+  return diffuse * attenuation + specular * attenuation;
 }
 
 void main() {
@@ -118,14 +118,14 @@ void main() {
     if (light_sources[i].color.w < 0) {
       continue;
     }
-    light_contrib.a += shadow_test(i, frag_pos_world);
-
+    float is_lit = shadow_test(i, frag_pos_world);
     light_contrib.xyz += calculate_light_contrib(i, view_dir, frag_normal_world,
                                                  frag_pos_world) *
-                         min(1, light_contrib.a);
+                         is_lit;
+    light_contrib.a += is_lit;
   }
   light_contrib = clamp(light_contrib, 0, 1);
 
   out_frag_color =
-      vec4(light_contrib.xyz * frag_color.xyz * light_contrib.a, 1);
+      vec4((ambient + light_contrib.xyz * frag_color.xyz) * light_contrib.a, 1);
 }
