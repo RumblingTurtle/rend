@@ -132,7 +132,8 @@ vec4 get_occlusion_ratio() {
     }
     sample_count++;
   }
-  return vec4(1 - (occluded_samples / sample_count));
+  return vec4(1 - (occluded_samples / sample_count) +
+              0.0001); // Don't want the occlusion to be 0
 }
 
 void main() {

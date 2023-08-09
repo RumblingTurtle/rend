@@ -243,6 +243,7 @@ void Renderer::init_swapchain() {
   composite_pass.images = vkb_swapchain.get_images().value();
   composite_pass.image_views = vkb_swapchain.get_image_views().value();
   composite_pass.color_format = vkb_swapchain.image_format;
+  composite_pass.color_space = vkb_swapchain.color_space;
 
   _deallocation_queue.push(
       [=] { vkDestroySwapchainKHR(_device, _swapchain, nullptr); });

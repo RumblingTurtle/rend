@@ -151,7 +151,7 @@ int main() {
     light.set_fov(M_PI * 0.3f);
     light.set_direction(-light.get_position().normalized());
     light_speeds[i] = rand_float(-100, 100);
-    light.set_intensity(0.1);
+    light.set_intensity(0.5);
   }
 
   renderer.camera->position = Eigen::Vector3f{25, 12, -24};

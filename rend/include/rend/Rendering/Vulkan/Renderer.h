@@ -90,6 +90,7 @@ public:
     std::vector<VkFramebuffer> framebuffers;
 
     VkFormat color_format;
+    VkColorSpaceKHR color_space;
     VkFormat depth_format = VK_FORMAT_D32_SFLOAT;
 
     Material material;

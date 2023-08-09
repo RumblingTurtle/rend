@@ -124,8 +124,8 @@ void main() {
                          is_lit;
     light_contrib.a += is_lit;
   }
-  light_contrib = clamp(light_contrib, 0, 1);
+  light_contrib.a = clamp(light_contrib.a, 0, 1);
 
   out_frag_color =
-      vec4((ambient + light_contrib.xyz * frag_color.xyz) * light_contrib.a, 1);
+      vec4(ambient + (light_contrib.xyz * frag_color.xyz) * light_contrib.a, 1);
 }

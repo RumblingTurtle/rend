@@ -50,11 +50,26 @@ vec3 blur(vec2 uv, sampler2D tex) {
          max(sample_count, 1);
 }
 
+float A = 0.15;
+float B = 0.50;
+float C = 0.10;
+float D = 0.20;
+float E = 0.02;
+float F = 0.30;
+float W = 11.2;
+
+vec3 ACESFilm(vec3 x) {
+  // Uncharted 2 tonemapping
+  // http://filmicworlds.com/blog/filmic-tonemapping-operators/
+  return ((x * (A * x + C * B) + D * E) / (x * (A * x + B) + D * F)) - E / F;
+}
+
 void main() {
   out_frag_color.xyz =
       texture(shading, screen_uv).xyz * blur(screen_uv, occlusion_texture);
   out_frag_color.xyz =
       mix(out_frag_color.xyz, blur(screen_uv, reflection_texture),
           texture(reflection_texture, screen_uv).a * 0.2f);
+  out_frag_color.xyz = ACESFilm(out_frag_color.xyz);
   gl_FragDepth = texture(depth, screen_uv).r;
 }
