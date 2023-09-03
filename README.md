@@ -5,9 +5,22 @@
 </p>
 
 Vulkan based open-source, C++ game engine for 3D games
+### Renderer Features
+  - Deffered rendering pipeline
+  - Atlas based shadow mapping (DOOM 2016) with up to 64 dynamic light sources
+  - Material masks
+  - HDR
+  - Tonemapping (Uncharted 2 style)
+  - SSR
+  - SSAO
+
+  ToDo
+  - Global Illumination
+  - Paralax corrected cubemap reflections
+  - Render targets
+  - Particle system
 
 ## Platforms
-
 As of now only tested on Ubuntu 20.04
 ## Requirements
 `Git submodules`
